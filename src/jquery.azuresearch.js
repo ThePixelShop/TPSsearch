@@ -182,6 +182,7 @@
                         ls.facetsSelected.indexOf($(this).data('value')), 1
                     );
                 $(this).remove();
+                debug(ls);
                 search();
             })
             .appendTo(c);
@@ -371,6 +372,8 @@
         }
 
         var f = null;
+        //Save the current filter
+        var previousFilter = ls.searchParms.filter;
 
         //Apply Facet Filters
         if (ls.facetsSelected.length > 0) {
@@ -382,7 +385,7 @@
 
             f = facetFilter.join(' ' + ls.facets.searchMode + ' ');
 
-            if (ls.searchParms.filter)
+            if (previousFilter)
                 f = ls.searchParms.filter + ' ' + ls.facets.searchMode + ' ' + f;
 
         }
@@ -409,6 +412,9 @@
                 ? response['@odata.count'] : -1;
             ls.onResults.call(response, local);
         });
+
+        //Return the filter to the original state
+        ls.searchParms.filter = previousFilter;
     }
 
 
