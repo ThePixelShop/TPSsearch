@@ -59,7 +59,8 @@
         results: {
             container: '#results',
             template: null,
-            onCreate: function () { }
+            onCreate: function () { },
+            alwaysClearContainer: false
         },
         urlParameters: {
             address: 'a',
@@ -221,7 +222,9 @@
         if (!c || !data["value"])
             return;
 
-        c.html('');
+        //Clear the container if skip is 0 or if the clear is forced by setting
+        if (rs.alwaysClearContainer || ls.searchParms.skip == 0)
+            c.html('');
 
         $(data["value"]).each(function (i, v) {
 
