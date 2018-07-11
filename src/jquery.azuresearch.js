@@ -50,7 +50,8 @@
         facetsApplied: {
             container: null,
             class: 'selected-facet',
-            extraAttributes: {}
+            extraAttributes: {},
+            ignoreFacets: []
         },
         facetsDictionary: null,
         //Array containing facetname|facetvalue
@@ -167,10 +168,14 @@
             return;
 
         var lastFacet = this.pop();
-        debug(lastFacet);
         var c = $(sfs.container);
 
         var fs = lastFacet.split('|');
+
+        //Ignore if necessary
+        if (sfs.ignoreFacets.indexOf(fs[0]) != -1)
+            return;
+
         $('<a/>').text(fs[1])
             .attr({ 'href': '#' })
             .attr(sfs.extraAttributes)
