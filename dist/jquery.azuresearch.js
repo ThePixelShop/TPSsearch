@@ -41,6 +41,8 @@
             wrapper: "<li/>",
             wrapperClass: "facet-item",
             showCount: true,
+            countWrapper: null,
+            countWrapperClass: null,
             facetOnClick: defaultFacetClick,
             searchMode: 'and',
             onFacetSelect: defaultFacetSelect,
@@ -318,13 +320,24 @@
 
                 //Facets
                 $(data["@search.facets"][v]).each(function (j, k) {
-                    var fText = fs.showCount ? k.value + " (" + k.count + ")" : k.value;
+
+                    //Create the facet
                     var f = $(fs.facet)
                         .addClass(fs.facetClass)
-                        .text(fText)
+                        .html(k.value)
                         .on('click', fs.facetOnClick)
                         .data('azuresearchFacetName', v)
                         .data('azuresearchFacetValue', k.value);
+
+                    //Counter
+                    if (fs.showCount && ls.facets.countWrapper) {
+                        $(ls.facets.countWrapper)
+                            .text("(" + k.count + ")")
+                            .addClass(ls.facets.countWrapperClass)
+                            .appendTo(f);
+                    } else if (fs.showCount) {
+                        f.append(" (" + k.count + ")");
+                    }
 
                     //Do not display selected facets
                     if (ls.facetsSelected.indexOf(v + '|' + k.value) != -1)
