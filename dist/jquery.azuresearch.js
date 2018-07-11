@@ -53,7 +53,8 @@
             container: null,
             class: 'selected-facet',
             extraAttributes: {},
-            ignoreFacets: []
+            ignoreFacets: [],
+            onChange: function () { }
         },
         facetsDictionary: null,
         //Array containing facetname|facetvalue
@@ -158,6 +159,7 @@
             return;
 
         ls.facetsSelected.push(value);
+        ls.facetsApplied.onChange.call(ls.facetsSelected.slice(0));
         ls.facets.onFacetSelect.call(ls.facetsSelected.slice(0));
         search();
     }
@@ -189,8 +191,8 @@
                     .splice(
                         ls.facetsSelected.indexOf($(this).data('value')), 1
                     );
+                ls.facetsApplied.onChange.call(ls.facetsSelected.slice(0));
                 $(this).remove();
-                debug(ls);
                 search();
             })
             .appendTo(c);
