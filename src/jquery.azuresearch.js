@@ -419,7 +419,7 @@
             debug('Filter Geo searching by distance : ' + ls.geoSearch.maxDistance);
             var geoFilter = "geo.distance(" + ls.geoSearch.azureFieldName + ", geography'POINT(" + ls.geoSearch.lng + " " + ls.geoSearch.lat + ")') le " + ls.geoSearch.maxDistance;
             if(f) {
-                f += ' AND ' + geoFilter
+                f += ' and ' + geoFilter
             } else {
                 f = geoFilter;
             }
