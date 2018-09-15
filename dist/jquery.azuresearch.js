@@ -16,7 +16,8 @@
             lng: null,
             fieldName: '_distance',
             azureFieldName: null,
-            unit: 'K'
+            unit: 'K',
+            maxDistance: null
         },
         searchParms: {
             search: "*",
@@ -413,6 +414,17 @@
 
         }
 
+        //Apply geo distance filter if configured
+        if (local.isGeoSearch && ls.geoSearch.maxDistance) {
+            debug('Filter Geo searching by distance : ' + ls.geoSearch.maxDistance);
+            var geoFilter = "geo.distance(" + ls.geoSearch.azureFieldName + ", geography'POINT(" + ls.geoSearch.lng + " " + ls.geoSearch.lat + ")') le " + ls.geoSearch.maxDistance;
+            if(f) {
+                f += ' and ' + geoFilter
+            } else {
+                f = geoFilter;
+            }
+        }
+        
         if (f)
             ls.searchParms.filter = f;
 
