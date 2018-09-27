@@ -404,7 +404,8 @@
             var facetFilter = [];
             ls.facetsSelected.forEach(function (item, index) {
                 var p = item.split('|');
-                facetFilter.push(p[0] + '/any(m: m eq \'' + p[1] + '\')');
+                // apply filter and escape single quotes in value (')
+                facetFilter.push(p[0] + '/any(m: m eq \'' + p[1].replace(/[']/gi,'\'\'') + '\')');
             });
 
             f = facetFilter.join(' ' + ls.facets.searchMode + ' ');
