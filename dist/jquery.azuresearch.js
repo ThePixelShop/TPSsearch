@@ -48,7 +48,8 @@
             searchMode: 'and',
             onFacetSelect: defaultFacetSelect,
             groupWrapper: '<div/>',
-            groupWrapperClass: 'group'
+            groupWrapperClass: 'group',
+            emptyFacetText: '(none)'
         },
         facetsApplied: {
             container: null,
@@ -181,8 +182,16 @@
         //Ignore if necessary
         if (sfs.ignoreFacets.indexOf(fs[0]) != -1)
             return;
+        
+        if( c.find('.selected-facets-group[data-az-field="'+fs[0]+'"]').length > 0 ) {            
+            cc = c.find('.selected-facets-group[data-az-field="'+fs[0]+'"]');
+        } else {                        
+            cc = $('<div/>').addClass('selected-facets-group').attr('data-az-field',fs[0]).appendTo(c);
+            cc_title = ls.facetsDictionary && ls.facetsDictionary[fs[0]] ? ls.facetsDictionary[fs[0]] : v;
+            cc_titleElem = $('<span/>').addClass('selected-facets-group-title').text(cc_title).appendTo(cc);
+        }    
 
-        $('<a/>').text(fs[1])
+        var selectedFacet = $('<a/>').text(fs[1])
             .attr({ 'href': '#' })
             .attr(sfs.extraAttributes)
             .data('value', lastFacet)
@@ -193,10 +202,16 @@
                         ls.facetsSelected.indexOf($(this).data('value')), 1
                     );
                 ls.facetsApplied.onChange.call(ls.facetsSelected.slice(0));
-                $(this).remove();
+                // check if any facets exist other than this one
+                if($(this).parent('.selected-facets-group[data-az-field="'+fs[0]+'"]').children('.selected-facet').length <= 1) {
+                    $(this).parent('.selected-facets-group[data-az-field="'+fs[0]+'"]').remove();
+                } else {
+                    $(this).remove();
+                }
                 search();
             })
-            .appendTo(c);
+
+            selectedFacet.appendTo(cc);
     }
 
     function processAddress(data) {
@@ -322,12 +337,12 @@
                 var countFacets = 0;
 
                 //Facets
-                $(data["@search.facets"][v]).each(function (j, k) {
-
+                $(data["@search.facets"][v]).each(function (j, k) {                    
+                    var facetLabel = k.value != '' ? k.value : fs.emptyFacetText;
                     //Create the facet
                     var f = $(fs.facet)
                         .addClass(fs.facetClass)
-                        .html(k.value)
+                        .html(facetLabel)
                         .on('click', fs.facetOnClick)
                         .data('azuresearchFacetName', v)
                         .data('azuresearchFacetValue', k.value);
