@@ -1143,7 +1143,7 @@
             updatedHistoryUrl = urlNew;
         }  
         // push the new search query string to the browser history
-        window.history.pushState( { 'url' : updatedHistoryUrl }, '', updatedHistoryUrl );     
+        window.history.replaceState( { 'url' : updatedHistoryUrl }, '', updatedHistoryUrl );     
     }
 
     function updatePageHistory() {
@@ -1172,7 +1172,7 @@
             updatedHistoryUrl = urlNew;
         }  
         // push the new search query string to the browser history
-        window.history.pushState( { 'url' : updatedHistoryUrl }, '', updatedHistoryUrl );     
+        window.history.replaceState( { 'url' : updatedHistoryUrl }, 'page', updatedHistoryUrl );     
     }
 
 
