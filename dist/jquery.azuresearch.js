@@ -63,7 +63,8 @@
             onFacetSelect: defaultFacetSelect,
             groupWrapper: '<div/>',
             groupWrapperClass: 'group',
-            emptyFacetText: '(none)'
+            emptyFacetText: '(none)',
+            updateHistory: true
         },
         facetsApplied: {
             container: null,
@@ -93,6 +94,7 @@
                 appendPager: false,
                 pagerRangeIncrement: 5,
                 enders: true,
+                updateHistory: true,
                 labels: {
                     prev: 'Previous',
                     next: 'Next',
@@ -217,7 +219,7 @@
         loadFacets(data);
         loadResults(data);
         // render pager  
-        if(data['@odata.count'] > ls.searchParams.size) {
+        if(data['@odata.count'] > ls.searchParams.top) {
             renderPager(data);
         }    
         ls.onLoad.call(data, local);
@@ -227,7 +229,7 @@
     function defaultFacetChange(e) {
         e.preventDefault();
 
-        var value = $(this).data('azuresearchFacetName') + '|' + $(this).data('azuresearchFacetValue');
+        var value = $(this).data('azuresearchFacetName') + '||' + $(this).data('azuresearchFacetValue');
 
         if(e.target.nodeName == 'SELECT') {
             value = $(this).data('azuresearchFacetName') + '||' + $(this).val();
@@ -235,7 +237,8 @@
 
         if (ls.facetsSelected.indexOf(value) != -1)
             return;
-        ls.searchParams.start = 0;
+
+        ls.searchParams.skip = 0;
         local.currentPage = 1;
         ls.facetsSelected.push(value);
         ls.facetsApplied.onChange.call(ls.facetsSelected.slice(0));
@@ -256,6 +259,7 @@
 
         var fs = lastFacet.split('||');
 
+        console.log(fs);
         //Ignore if necessary
         if (sfs.ignoreFacets.indexOf(fs[0]) != -1)
             return;
@@ -264,7 +268,8 @@
             cc = c.find('.selected-facets-group[data-az-field="'+fs[0]+'"]');
         } else {                        
             cc = $('<div/>').addClass('selected-facets-group').attr('data-az-field',fs[0]).appendTo(c);
-            cc_title = ls.facetsDictionary && ls.facetsDictionary[fs[0]] ? ls.facetsDictionary[fs[0]] : v;
+            //cc_title = ls.facetsDictionary && ls.facetsDictionary[fs[0]] ? ls.facetsDictionary[fs[0]] : v;
+            cc_title = "";
             cc_titleElem = $('<span/>').addClass('selected-facets-group-title').text(cc_title).appendTo(cc);
         }    
 
@@ -279,7 +284,7 @@
                     .splice(
                         ls.facetsSelected.indexOf($(this).data('value')), 1
                     );
-                ls.searchParams.start = 0;
+                ls.searchParams.skip = 0;
                 local.currentPage = 1;
                 ls.facetsApplied.onChange.call(ls.facetsSelected.slice(0));
                 // check if any facets exist other than this one
@@ -308,7 +313,7 @@
                     local.clearAllAdded = false;
                     c.empty().hide();
                     ls.facetsSelected = [];
-                    ls.searchParams.start = 0;
+                    ls.searchParams.skip = 0;
                     local.currentPage = 1;
                     ls.facetsApplied.onChange.call(ls.facetsSelected);
                     
@@ -360,7 +365,7 @@
             // hide Loader
             if(ldr)
                 ldr.fadeOut();
-            $('<div/>').addClass('cloudsearch-no-results ' + rs.noResultsClasses).text(rs.noResults).appendTo(c);
+            $('<div/>').addClass('search-no-results ' + rs.noResultsClasses).text(rs.noResults).appendTo(c);
         }
 
         $(data["value"]).each(function (i, v) {
@@ -384,8 +389,8 @@
             } else {
                 //With template
                 var t = $(rs.template);
-                $(':not([data-azuresearch-field=""])', t).each(function (y, z) {
-                    var field = $(z).data('azuresearchField');
+                $(':not([data-search-field=""])', t).each(function (y, z) {
+                    var field = $(z).data('searchField');
                     var value = '';
                     if (field && v[field]) {
                         value = v[field];
@@ -400,12 +405,12 @@
                     }
 
                     //Format the data using the provided Callback function
-                    var format = $(z).data('azuresearchValueFormat');
+                    var format = $(z).data('searchValueFormat');
                     if (format && window[format])
                         value = window[format](value, v);
 
                     if (field) {                        
-                        if(typeof $(z).data('azuresearchValueFormatReplace') !== 'undefined') {
+                        if(typeof $(z).data('searchValueFormatReplace') !== 'undefined') {
                             $(z).replaceWith(value);
                         } else {
                             $(z).html(value);
@@ -433,7 +438,6 @@
     function renderPager(data) {
         
         var pg = ls.results.pager;
-        
         if (pg.appendPager) {            
             $(pg.container).empty();
             if(!local.pagerRendered) {
@@ -465,12 +469,12 @@
         if (!c)
             return;
 
+        
         if(pg.loadMore) {
             
             c.append(addPagerButton('load'));
             
         } else {         
-
             var items;
             if(pg.enders) {
                 c.append(addPagerButton('first'));
@@ -590,7 +594,7 @@
     function handlePager(next) {
         var pg = ls.results.pager; 
 
-        if(ls.searchParams.size && local.currentPage && local.rendered) {        
+        if(ls.searchParams.top && local.currentPage && local.rendered) {        
             local.rendered = false;                
             // go to next page of results
             if(!next) {
@@ -599,7 +603,7 @@
                 local.currentPage = local.currentPage - 1;
             }
             
-            ls.searchParams.start = (local.currentPage - 1) * ls.searchParams.size;         
+            ls.searchParams.skip = (local.currentPage - 1) * ls.searchParams.top;         
             search();
         }
     }
@@ -610,7 +614,7 @@
      */
     function skipToPage(num) {
         local.currentPage = num;
-        ls.searchParams.start = (local.currentPage - 1) * ls.searchParams.size;       
+        ls.searchParams.skip = (local.currentPage - 1) * ls.searchParams.top;       
         search();            
     }
 
@@ -624,21 +628,28 @@
             return;
 
         c.html('');
-
+        
         $(Object.keys(ls.facetsDictionary)).each(function (i, v) {
 
-            //Ignore the faceting options if any
-            if (v.indexOf(',') != -1)
-                v = v.split(',')[0];
+            var _fs = ls.facetsDictionary[v];
+            
 
-            if (data["@search.facets"][v]) {
+            if(typeof _fs == 'object' && _fs.params) {
+                _fs = ls.facetsDictionary[v].params;
+            }
+            //Ignore the faceting options if any
+            var _fsNm = fs;
+            if (_fs.indexOf(',') != -1)
+                _fsNm = _fs.split(',')[0];
+
+            if (data["@search.facets"][_fsNm]) {
 
                //Facet's Title
                var tt = v;
                if(typeof ls.facetsDictionary[v] == 'object' && ls.facetsDictionary[v].label) {
                    tt = ls.facetsDictionary[v].label;
-               } else if(ls.facetsDictionary && ls.facetsDictionary[v]) {
-                   tt = ls.facetsDictionary[v];
+               } else {
+                   tt = _fsNm;
                }
 
                 var title = $(fs.title).addClass(fs.titleClass).text(tt);
@@ -655,11 +666,11 @@
                 var w = $(fs.wrapperContainer).addClass(fs.wrapperContainerClass);
                 c.append(w);
 
-                if(typeof ls.facetsDictionary[v] == 'object' && ls.facetsDictionary[v].dropdown) {
-                    renderFacetSelect(w, title, data, v);
+                if(typeof _fs == 'object' && _fs.dropdown) {
+                    renderFacetSelect(w, title, data, _fsNm);
                 }
                 else {
-                    renderFacetList(w, title, data, v);
+                    renderFacetList(w, title, data, _fsNm);
                 }
                 
             }
@@ -824,11 +835,14 @@
             } else {
                 local.dateSearch = false;
             }
-            ls.searchParams.start = 0;
+            ls.searchParams.skip = 0;
             local.currentPage = 1;
             search();
         }
         
+    }
+
+    function setupDateFields() {
     }
 
     /**
@@ -868,13 +882,13 @@
         //Save the current filter
         
         var previousFilter = ls.searchParams.filter;
-
+        ls.searchParams['facets'] = [];
         if( ls.facetsDictionary ) {
             $(Object.keys(ls.facetsDictionary)).each(function(k,v){
-                var fieldParams = '{}';
+                var fieldParams = ls.facetsDictionary[v];
                 if(typeof ls.facetsDictionary[v] == 'object' && ls.facetsDictionary[v].params) 
                     fieldParams = ls.facetsDictionary[v].params;
-                ls.searchParams['facet.'+v] = fieldParams;                
+                ls.searchParams['facets'].push(fieldParams);
             });
         }
 
@@ -953,8 +967,8 @@
         }
 
         $.ajax(settings).done(function (response) {
-            local.totalResults = ls.searchParams.count && response['@odata.count']
-                ? response['@odata.count'] : -1;
+            local.totalResults = ls.searchParams.count && response['@odata.count'] ? response['@odata.count'] : -1;
+            local.totalPages = Math.ceil(local.totalResults / ls.searchParams.top);
             ls.onResults.call(response, local);
         });
 
