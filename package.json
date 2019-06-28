@@ -1,8 +1,8 @@
 {
-  "name": "jquery.azuresearch",
+  "name": "jquery.TPSsearch",
   "version": "1.0.0",
   "description": "Azure Search Jquery Plugin",
-  "main": "test.html",
+  "main": "index.html",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
