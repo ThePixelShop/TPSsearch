@@ -10,6 +10,8 @@ var reload = browserSync.reload;
 
 gulp.task('local', function () {
     browserSync.init({
+        port: 44379,
+        https: true,
         server: {
             baseDir: "./"
         }
