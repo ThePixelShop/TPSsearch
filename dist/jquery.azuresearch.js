@@ -23,7 +23,7 @@
             search: "*",
             facets: [],
             count: true,
-            top: 50,
+            top: null,
             skip: 0,
             filter: null,
             orderby: null
@@ -64,7 +64,7 @@
             groupWrapper: '<div/>',
             groupWrapperClass: 'group',
             emptyFacetText: '(none)',
-            updateHistory: true
+            updateHistory: false
         },
         facetsApplied: {
             container: null,
@@ -92,9 +92,10 @@
                 container: null,
                 loadMore: true,
                 appendPager: false,
+                pageSize: 50,
                 pagerRangeIncrement: 5,
                 enders: true,
-                updateHistory: true,
+                updateHistory: false,
                 labels: {
                     prev: 'Previous',
                     next: 'Next',
@@ -122,6 +123,7 @@
             longitude: 'ln',
             latlong: null,
             search: 'q',
+            facets: 'fc',
             page: 'p',
         },
         onResults: processResults,
@@ -177,6 +179,8 @@
 
             ls = $.extend(ls, options);
 
+            ls.searchParams.top = ls.results.pager.pageSize;
+
             checkUrlParameters();
         }
 
@@ -186,7 +190,8 @@
                 ls.facets.onFacetSelect.call([v]);
             });
         }
-
+        
+        
         if(ls.dates.hasDates) {
             setupDateFields();
         }
@@ -219,7 +224,7 @@
         loadFacets(data);
         loadResults(data);
         // render pager  
-        if(data['@odata.count'] > ls.searchParams.top) {
+        if(data['@odata.count'] > ls.results.pager.pageSize) {
             renderPager(data);
         }    
         ls.onLoad.call(data, local);
@@ -259,7 +264,6 @@
 
         var fs = lastFacet.split('||');
 
-        console.log(fs);
         //Ignore if necessary
         if (sfs.ignoreFacets.indexOf(fs[0]) != -1)
             return;
@@ -594,7 +598,7 @@
     function handlePager(next) {
         var pg = ls.results.pager; 
 
-        if(ls.searchParams.top && local.currentPage && local.rendered) {        
+        if(ls.results.pager.pageSize && local.currentPage && local.rendered) {        
             local.rendered = false;                
             // go to next page of results
             if(!next) {
@@ -603,7 +607,12 @@
                 local.currentPage = local.currentPage - 1;
             }
             
-            ls.searchParams.skip = (local.currentPage - 1) * ls.searchParams.top;         
+            ls.searchParams.skip = (local.currentPage - 1) * ls.results.pager.pageSize; 
+
+            if(ls.results.pager.updateHistory) {
+                updatePageHistory();   
+            }
+
             search();
         }
     }
@@ -614,7 +623,10 @@
      */
     function skipToPage(num) {
         local.currentPage = num;
-        ls.searchParams.skip = (local.currentPage - 1) * ls.searchParams.top;       
+        ls.searchParams.skip = (local.currentPage - 1) * ls.results.pager.pageSize;  
+        if(ls.results.pager.updateHistory) {
+            updatePageHistory();   
+        }
         search();            
     }
 
@@ -666,7 +678,7 @@
                 var w = $(fs.wrapperContainer).addClass(fs.wrapperContainerClass);
                 c.append(w);
 
-                if(typeof _fs == 'object' && _fs.dropdown) {
+                if(typeof ls.facetsDictionary[v] == 'object' && ls.facetsDictionary[v].dropdown) {
                     renderFacetSelect(w, title, data, _fsNm);
                 }
                 else {
@@ -968,7 +980,7 @@
 
         $.ajax(settings).done(function (response) {
             local.totalResults = ls.searchParams.count && response['@odata.count'] ? response['@odata.count'] : -1;
-            local.totalPages = Math.ceil(local.totalResults / ls.searchParams.top);
+            local.totalPages = Math.ceil(local.totalResults / ls.results.pager.pageSize);
             ls.onResults.call(response, local);
         });
 
@@ -1053,7 +1065,14 @@
             latitude = query(s.latitude),
             longitude = query(s.longitude),
             latlong = query(s.latlong),
-            search = query(s.search);
+            search = query(s.search),
+            facets = query(s.facets),
+            page = query(s.page);
+
+        /*
+        
+            facets: 'fc',
+            page: 'p', */
 
         //Split LatLong
         if (latlong && latlong.indexOf(',') != -1) {
@@ -1062,7 +1081,21 @@
         }
 
         //Apply Parameters
-        if (search) ls.searchParams.search = search;
+        if (search) {
+            ls.searchParams.search = search;
+        }
+
+        if(page) {
+            local.currentPage = Math.floor(parseFloat(page));
+            if(ls.results.pager.loadMore) {
+                ls.searchParams.skip = 0;
+                ls.searchParams.top = local.currentPage * ls.results.pager.pageSize;
+            } else {
+                ls.searchParams.skip = (local.currentPage - 1) * ls.results.pager.pageSize;
+            }
+            
+        }
+        
         if (latitude && longitude) {
             ls.geoSearch.lat = latitude;
             ls.geoSearch.lng = longitude;
@@ -1079,6 +1112,98 @@
 
     }
 
+    function updateFacetHistory() {
+            
+        var facetParam, urlInit, urlNew, facetString, updatedHistoryUrl;
+        urlInit = window.location.pathname + window.location.search;
+        facetParam = ls.urlParameters.facets;
+        // check to see if facets are already in the
+        // query string, and if so, remove them
+        if( urlInit.indexOf(facetParam) > -1 ) {
+            urlNew = updateUrlParameter(urlInit, facetParam);
+        } else {
+            urlNew = urlInit;
+        }
+        // check to see if facets have been 
+        // applied to the search options
+        // and if so, add them to the query string
+        if(ls.facetsSelected.length > 0) {                
+            // facetString = .toString();
+            facetString = '';
+            $.each(ls.facetsSelected, function(k, v) {
+                if(k > 0) {
+                    facetString += ';';
+                }
+                facetString += encodeURIComponent(v.toString());
+            });                
+            updatedHistoryUrl = urlNew;
+            updatedHistoryUrl += (urlNew.indexOf('?') > -1) ? '&' : '?';
+            updatedHistoryUrl += facetParam + '=' + facetString;
+        } else {
+            updatedHistoryUrl = urlNew;
+        }  
+        // push the new search query string to the browser history
+        window.history.pushState( { 'url' : updatedHistoryUrl }, '', updatedHistoryUrl );     
+    }
+
+    function updatePageHistory() {
+        
+        var urlInit, urlNew, pageParam, pageVal, updatedHistoryUrl;
+        urlInit = window.location.pathname + window.location.search;
+        pageParam = ls.urlParameters.page;
+        // check to see if facets are already in the
+        // query string, and if so, remove them
+        if( urlInit.indexOf(pageParam) > -1 ) {
+            urlNew = updateUrlParameter(urlInit, pageParam);
+        } else {
+            urlNew = urlInit;
+        }
+        // check to see if facets have been 
+        // applied to the search options
+        // and if so, add them to the query string
+        if(local.currentPage > 1) {                
+            // facetString = .toString();
+            pageVal = local.currentPage.toString();
+                          
+            updatedHistoryUrl = urlNew;
+            updatedHistoryUrl += (urlNew.indexOf('?') > -1) ? '&' : '?';
+            updatedHistoryUrl += pageParam + '=' + pageVal;
+        } else {
+            updatedHistoryUrl = urlNew;
+        }  
+        // push the new search query string to the browser history
+        window.history.pushState( { 'url' : updatedHistoryUrl }, '', updatedHistoryUrl );     
+    }
+
+
+
+    //append or update query string parameters
+    function updateUrlParameter(uri, key, value) {
+        // remove the hash part before operating on the uri
+        var i = uri.indexOf('#');
+        var hash = i === -1 ? '' : uri.substr(i);
+        uri = i === -1 ? uri : uri.substr(0, i);
+
+        var re = new RegExp("([?&])" + key + "=.*?(&|$)", "i");
+        var separator = uri.indexOf('?') !== -1 ? "&" : "?";
+
+        if (!value) {
+            // remove key-value pair if value is empty
+            uri = uri.replace(new RegExp("([?&]?)" + key + "=[^&]*", "i"), '');
+            if (uri.slice(-1) === '?') {
+                uri = uri.slice(0, -1);
+            }
+            // replace first occurrence of & by ? if no ? is present
+            if (uri.indexOf('?') === -1) {
+                uri = uri.replace(/&/, '?')
+            }
+        } else if (uri.match(re)) {
+            uri = uri.replace(re, '$1' + key + "=" + value + '$2');
+        } else {
+            uri = uri + separator + key + "=" + value;
+        }
+        return uri + hash;
+    }
 
 
 }(jQuery));
