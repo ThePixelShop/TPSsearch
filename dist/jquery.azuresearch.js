@@ -230,107 +230,6 @@
         ls.onLoad.call(data, local);
     }
 
-    //Default action when a facet receives a click
-    function defaultFacetChange(e) {
-        e.preventDefault();
-
-        var value = $(this).data('azuresearchFacetName') + '||' + $(this).data('azuresearchFacetValue');
-
-        if(e.target.nodeName == 'SELECT') {
-            value = $(this).data('azuresearchFacetName') + '||' + $(this).val();
-        }
-
-        if (ls.facetsSelected.indexOf(value) != -1)
-            return;
-
-        ls.searchParams.skip = 0;
-        local.currentPage = 1;
-        ls.facetsSelected.push(value);
-        ls.facetsApplied.onChange.call(ls.facetsSelected.slice(0));
-        ls.facets.onFacetSelect.call(ls.facetsSelected.slice(0));
-        search();
-    }
-
-    //Default action when a facet is selected
-    function defaultFacetSelect() {
-
-        var sfs = ls.facetsApplied;
-
-        if (!sfs.container)
-            return;
-
-        var lastFacet = this.pop();
-        var c = $(sfs.container);
-
-        var fs = lastFacet.split('||');
-
-        //Ignore if necessary
-        if (sfs.ignoreFacets.indexOf(fs[0]) != -1)
-            return;
-        
-        if( c.find('.selected-facets-group[data-az-field="'+fs[0]+'"]').length > 0 ) {            
-            cc = c.find('.selected-facets-group[data-az-field="'+fs[0]+'"]');
-        } else {                        
-            cc = $('<div/>').addClass('selected-facets-group').attr('data-az-field',fs[0]).appendTo(c);
-            //cc_title = ls.facetsDictionary && ls.facetsDictionary[fs[0]] ? ls.facetsDictionary[fs[0]] : v;
-            cc_title = "";
-            cc_titleElem = $('<span/>').addClass('selected-facets-group-title').text(cc_title).appendTo(cc);
-        }    
-
-        var selectedFacet = $('<a/>').text(fs[1])
-            .attr({ 'href': '#' })
-            .attr(sfs.extraAttributes)
-            .data('value', lastFacet)
-            .addClass(sfs.class)
-            .on('click', function (e) {
-                e.preventDefault();
-                ls.facetsSelected
-                    .splice(
-                        ls.facetsSelected.indexOf($(this).data('value')), 1
-                    );
-                ls.searchParams.skip = 0;
-                local.currentPage = 1;
-                ls.facetsApplied.onChange.call(ls.facetsSelected.slice(0));
-                // check if any facets exist other than this one
-                if($(this).parent('.selected-facets-group[data-az-field="'+fs[0]+'"]').children('.selected-facet').length <= 1) {
-                    $(this).parent('.selected-facets-group[data-az-field="'+fs[0]+'"]').remove();
-                } else {
-                    $(this).remove();
-                    if(!(c.children().not('.clear-all-facets').length > 0)) {            
-                        c.hide();
-                    }                 
-                }
-                search();
-            })
-
-            selectedFacet.appendTo(cc);
-            // clearAll
-            if(sfs.clearAll.enabled && !local.clearAllAdded) {
-                $('<a/>').text(sfs.clearAll.label)
-                .attr({ 'href': '#' })
-                .attr(sfs.extraAttributes)
-                .addClass('clear-all-facets')
-                .addClass(sfs.class)
-                .addClass(sfs.clearAll.className)
-                .on('click', function (e) {
-                    e.preventDefault();
-                    local.clearAllAdded = false;
-                    c.empty().hide();
-                    ls.facetsSelected = [];
-                    ls.searchParams.skip = 0;
-                    local.currentPage = 1;
-                    ls.facetsApplied.onChange.call(ls.facetsSelected);
-                    
-                    search();                
-                })
-                .prependTo(c);
-                local.clearAllAdded = true;
-            }
-
-            c.show();
-
-    }
-
     function processAddress(data) {
         debug('Google Geocode return:');
         debug(data);
@@ -345,7 +244,6 @@
         local.waitingLatLong = false;
         search();
     }
-
 
     /**
      * Content Functions
@@ -628,6 +526,109 @@
             updatePageHistory();   
         }
         search();            
+    }
+
+    //Default action when a facet receives a click
+    function defaultFacetChange(e) {
+        e.preventDefault();
+
+        var value = $(this).data('azuresearchFacetName') + '||' + $(this).data('azuresearchFacetValue');
+
+        if(e.target.nodeName == 'SELECT') {
+            value = $(this).data('azuresearchFacetName') + '||' + $(this).val();
+        }
+
+        if (ls.facetsSelected.indexOf(value) != -1)
+            return;
+
+        ls.searchParams.skip = 0;
+        local.currentPage = 1;
+        ls.facetsSelected.push(value);
+        ls.facetsApplied.onChange.call(ls.facetsSelected.slice(0));
+        ls.facets.onFacetSelect.call(ls.facetsSelected.slice(0));
+        search();
+    }
+
+    //Default action when a facet is selected
+    function defaultFacetSelect() {
+
+        var sfs = ls.facetsApplied;
+
+        if (!sfs.container)
+            return;
+
+        var lastFacet = this.pop();
+        var c = $(sfs.container);
+
+        var fs = lastFacet.split('||');
+
+        //Ignore if necessary
+        if (sfs.ignoreFacets.indexOf(fs[0]) != -1)
+            return;
+        
+        if( c.find('.selected-facets-group[data-az-field="'+fs[0]+'"]').length > 0 ) {            
+            cc = c.find('.selected-facets-group[data-az-field="'+fs[0]+'"]');
+        } else {                        
+            cc = $('<div/>').addClass('selected-facets-group').attr('data-az-field',fs[0]).appendTo(c);
+            //cc_title = ls.facetsDictionary && ls.facetsDictionary[fs[0]] ? ls.facetsDictionary[fs[0]] : v;
+            console.log(ls.facetsDictionary);
+            console.log(fs);
+            cc_title = "";
+            cc_titleElem = $('<span/>').addClass('selected-facets-group-title').text(cc_title).appendTo(cc);
+        }    
+
+        var selectedFacet = $('<a/>').text(fs[1])
+            .attr({ 'href': '#' })
+            .attr(sfs.extraAttributes)
+            .data('value', lastFacet)
+            .addClass(sfs.class)
+            .on('click', function (e) {
+                e.preventDefault();
+                ls.facetsSelected
+                    .splice(
+                        ls.facetsSelected.indexOf($(this).data('value')), 1
+                    );
+                ls.searchParams.skip = 0;
+                local.currentPage = 1;
+                ls.facetsApplied.onChange.call(ls.facetsSelected.slice(0));
+                // check if any facets exist other than this one
+                if($(this).parent('.selected-facets-group[data-az-field="'+fs[0]+'"]').children('.selected-facet').length <= 1) {
+                    $(this).parent('.selected-facets-group[data-az-field="'+fs[0]+'"]').remove();
+                } else {
+                    $(this).remove();
+                    if(!(c.children().not('.clear-all-facets').length > 0)) {            
+                        c.hide();
+                    }                 
+                }
+                search();
+            })
+
+            selectedFacet.appendTo(cc);
+            // clearAll
+            if(sfs.clearAll.enabled && !local.clearAllAdded) {
+                $('<a/>').text(sfs.clearAll.label)
+                .attr({ 'href': '#' })
+                .attr(sfs.extraAttributes)
+                .addClass('clear-all-facets')
+                .addClass(sfs.class)
+                .addClass(sfs.clearAll.className)
+                .on('click', function (e) {
+                    e.preventDefault();
+                    local.clearAllAdded = false;
+                    c.empty().hide();
+                    ls.facetsSelected = [];
+                    ls.searchParams.skip = 0;
+                    local.currentPage = 1;
+                    ls.facetsApplied.onChange.call(ls.facetsSelected);
+                    
+                    search();                
+                })
+                .prependTo(c);
+                local.clearAllAdded = true;
+            }
+
+            c.show();
+
     }
 
     //Load the facets according to the results
