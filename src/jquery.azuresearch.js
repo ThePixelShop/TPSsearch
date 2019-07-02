@@ -63,14 +63,15 @@
             onFacetSelect: defaultFacetSelect,
             groupWrapper: '<div/>',
             groupWrapperClass: 'group',
-            emptyFacetText: '(none)',
-            updateHistory: false
+            emptyFacetText: '(none)'
         },
         facetsApplied: {
             container: null,
             class: 'selected-facet',
             extraAttributes: {},
             ignoreFacets: [],
+            groupFacetsByType: false,
+            updateHistory: false,
             clearAll: {
                 enabled: true,
                 label: 'Clear all',
@@ -507,10 +508,6 @@
             
             ls.searchParams.skip = (local.currentPage - 1) * ls.results.pager.pageSize; 
 
-            if(ls.results.pager.updateHistory) {
-                updatePageHistory();   
-            }
-
             search();
         }
     }
@@ -522,9 +519,6 @@
     function skipToPage(num) {
         local.currentPage = num;
         ls.searchParams.skip = (local.currentPage - 1) * ls.results.pager.pageSize;  
-        if(ls.results.pager.updateHistory) {
-            updatePageHistory();   
-        }
         search();            
     }
 
@@ -566,14 +560,23 @@
         if (sfs.ignoreFacets.indexOf(fs[0]) != -1)
             return;
         
-        if( c.find('.selected-facets-group[data-az-field="'+fs[0]+'"]').length > 0 ) {            
+        var cc = null, cc_title = null, cc_titleElem = null; 
+
+        if( c.find('.selected-facets-group[data-az-field="'+fs[0]+'"]').length > 0 && sfs.groupFacetsByType ) {            
             cc = c.find('.selected-facets-group[data-az-field="'+fs[0]+'"]');
-        } else {                        
+        } else if ( sfs.groupFacetsByType ) {                        
             cc = $('<div/>').addClass('selected-facets-group').attr('data-az-field',fs[0]).appendTo(c);
             //cc_title = ls.facetsDictionary && ls.facetsDictionary[fs[0]] ? ls.facetsDictionary[fs[0]] : v;
-            console.log(ls.facetsDictionary);
-            console.log(fs);
-            cc_title = "";
+            
+            cc_title = fs[0];
+            // get facet label based on facet field:
+            $.each(ls.facetsDictionary, function(k,v) {
+                if(v.fieldName == fs[0]) {
+                    cc_title = v.label;
+                    return false;
+                }
+            });
+            
             cc_titleElem = $('<span/>').addClass('selected-facets-group-title').text(cc_title).appendTo(cc);
         }    
 
@@ -595,15 +598,23 @@
                 if($(this).parent('.selected-facets-group[data-az-field="'+fs[0]+'"]').children('.selected-facet').length <= 1) {
                     $(this).parent('.selected-facets-group[data-az-field="'+fs[0]+'"]').remove();
                 } else {
-                    $(this).remove();
-                    if(!(c.children().not('.clear-all-facets').length > 0)) {            
-                        c.hide();
-                    }                 
+                    $(this).remove();   
                 }
+
+                if(!(c.children().not('.clear-all-facets').length > 0)) {            
+                    c.hide();
+                }              
+
                 search();
             })
 
-            selectedFacet.appendTo(cc);
+            if(sfs.groupFacetsByType) {
+                selectedFacet.appendTo(cc);
+            } else {
+                selectedFacet.appendTo(c);
+            }
+
+            
             // clearAll
             if(sfs.clearAll.enabled && !local.clearAllAdded) {
                 $('<a/>').text(sfs.clearAll.label)
@@ -644,17 +655,8 @@
         
         $(Object.keys(ls.facetsDictionary)).each(function (i, v) {
 
-            var _fs = ls.facetsDictionary[v];
-            
-
-            if(typeof _fs == 'object' && _fs.params) {
-                _fs = ls.facetsDictionary[v].params;
-            }
-            //Ignore the faceting options if any
-            var _fsNm = fs;
-            if (_fs.indexOf(',') != -1)
-                _fsNm = _fs.split(',')[0];
-
+            var _fsNm = ls.facetsDictionary[v].fieldName;
+                       
             if (data["@search.facets"][_fsNm]) {
 
                //Facet's Title
@@ -864,6 +866,16 @@
 
     //Execute the AJAX call to Azure Search
     function search() {
+
+        if(ls.results.pager.updateHistory) {
+            updatePageHistory();   
+        }
+        
+        if(ls.facetsApplied.updateHistory) {
+            updateFacetHistory();
+        }
+
+
         local.isGeoSearch = false;
 
         // show Loader
@@ -898,9 +910,10 @@
         ls.searchParams['facets'] = [];
         if( ls.facetsDictionary ) {
             $(Object.keys(ls.facetsDictionary)).each(function(k,v){
-                var fieldParams = ls.facetsDictionary[v];
+                var fieldParams = null;
                 if(typeof ls.facetsDictionary[v] == 'object' && ls.facetsDictionary[v].params) 
-                    fieldParams = ls.facetsDictionary[v].params;
+                    fieldParams = ls.facetsDictionary[v].fieldName + ',';
+                    fieldParams += ls.facetsDictionary[v].params;
                 ls.searchParams['facets'].push(fieldParams);
             });
         }
@@ -1093,8 +1106,11 @@
                 ls.searchParams.top = local.currentPage * ls.results.pager.pageSize;
             } else {
                 ls.searchParams.skip = (local.currentPage - 1) * ls.results.pager.pageSize;
-            }
-            
+            }            
+        }
+
+        if(facets) {
+            ls.facetsSelected = facets.split(';');
         }
         
         if (latitude && longitude) {
@@ -1128,7 +1144,8 @@
         // check to see if facets have been 
         // applied to the search options
         // and if so, add them to the query string
-        if(ls.facetsSelected.length > 0) {                
+        if(ls.facetsSelected.length > 0) {     
+            
             // facetString = .toString();
             facetString = '';
             $.each(ls.facetsSelected, function(k, v) {
