@@ -595,7 +595,7 @@
                 local.currentPage = 1;
                 ls.facetsApplied.onChange.call(ls.facetsSelected.slice(0));
                 // check if any facets exist other than this one
-                if($(this).parent('.selected-facets-group[data-az-field="'+fs[0]+'"]').children('.selected-facet').length <= 1) {
+                if(ls.facetsApplied.groupFacetsByType && $(this).parent('.selected-facets-group[data-az-field="'+fs[0]+'"]').children('.selected-facet').length <= 1) {
                     $(this).parent('.selected-facets-group[data-az-field="'+fs[0]+'"]').remove();
                 } else {
                     $(this).remove();   
