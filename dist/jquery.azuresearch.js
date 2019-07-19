@@ -33,11 +33,11 @@
             fields: {
                 zone: 'EST',
                 from: {
-                    cloudSearchField: null,
+                    indexField: null,
                     fieldId: null
                 },
                 to: {
-                    cloudSearchField: null,
+                    indexField: null,
                     fieldId: null
                 }
             }
@@ -85,7 +85,6 @@
         results: {
             container: '#results',
             template: null,
-            noResults: 'Sorry there are no results for your query',
             noResultsClasses: '',
             onCreate: function () { },
             loaderContainer: null,
@@ -102,7 +101,6 @@
                     next: 'Next',
                     first: 'First',
                     last: 'Last',
-                    results: 'results for',
                     load: 'load more',
                     ada: {
                         current: 'You are on page',
@@ -114,9 +112,23 @@
                         load: 'Load more results'
                     }
                 },
+                classes: {
+                    prev: '',
+                    next: '',
+                    last: '',
+                    results: '',
+                    load: '',
+                },
                 onRender: function () { },
                 onPageChange: function () { },
             },
+            labels: {
+                activeFacets: "Filters",
+                noResults: 'Sorry there are no results for your query',
+                haveResults: 'Results Found',
+                haveQueryBefore: 'Your search for',
+                haveQueryAfter: 'returned {0} results'
+            }
         },
         urlParameters: {
             address: 'a',
@@ -126,6 +138,11 @@
             search: 'q',
             facets: 'fc',
             page: 'p',
+        },
+        orderbyOptions: {
+            orderbySelector: null,
+            orderbyEvent: 'click',
+            onOrderbyChange: defaultOrderbyChange
         },
         onResults: processResults,
         onLoad: function () { },
@@ -147,6 +164,8 @@
         fromDate: null,
         toDate: null,
         clearAllAdded: false,
+        queryText: null,
+        hasActiveFacets: false,
     }
 
     /**
@@ -177,6 +196,8 @@
                 options.results = $.extend(true, ls.results, options.results);
             if (options.urlParameters) 
                 options.urlParameters = $.extend(ls.urlParameters, options.urlParameters);
+                if (options.orderbyOptions)
+                options.orderbyOptions = $.extend(ls.orderbyOptions, options.orderbyOptions);
 
             ls = $.extend(ls, options);
 
@@ -190,8 +211,12 @@
             $(ls.facetsSelected).each(function (i, v) {
                 ls.facets.onFacetSelect.call([v]);
             });
+
+            if (ls.orderbyOptions.orderbySelector) {
+                $(document).on(ls.orderbyOptions.orderbyEvent, ls.orderbyOptions.orderbySelector, ls.orderbyOptions.onOrderbyChange);
+            }
         }
-        
+
         
         if(ls.dates.hasDates) {
             setupDateFields();
@@ -219,17 +244,6 @@
      * Handlers
      */
 
-    function processResults() {
-        var data = this;
-
-        loadFacets(data);
-        loadResults(data);
-        // render pager  
-        if(data['@odata.count'] > ls.results.pager.pageSize) {
-            renderPager(data);
-        }    
-        ls.onLoad.call(data, local);
-    }
 
     function processAddress(data) {
         debug('Google Geocode return:');
@@ -246,6 +260,18 @@
         search();
     }
 
+    function processResults() {
+        var data = this;
+
+        loadFacets(data);
+        loadResults(data);
+        // render pager  
+        if(data['@odata.count'] > ls.results.pager.pageSize) {
+            renderPager(data);
+        }    
+        ls.onLoad.call(data, local);
+    }
+
     /**
      * Content Functions
      */
@@ -259,6 +285,8 @@
         if (!c || !data["value"])
             return;
 
+        renderResultsMessage(data['@odata.count']);
+
         //Clear the container if skip is 0 or if the clear is forced by setting
         if (!rs.pager.loadMore || ls.searchParams.skip == 0)
             c.html('');
@@ -268,7 +296,7 @@
             // hide Loader
             if(ldr)
                 ldr.fadeOut();
-            $('<div/>').addClass('search-no-results ' + rs.noResultsClasses).text(rs.noResults).appendTo(c);
+            $('<div/>').addClass('search-no-results ' + rs.noResultsClasses).text(rs.labels.noResults).appendTo(c);
         }
 
         $(data["value"]).each(function (i, v) {
@@ -330,10 +358,34 @@
                 rs.onCreate.call(t);
             }
         });
+
+        c.fadeIn();
         local.rendered = true;
 
     }
 
+    function renderResultsMessage(count) {
+
+        var rs = ls.results;
+        var c = $(rs.resultsMsgContainer);
+
+        if (!c)
+            return;
+
+        var msg = $('<span/>').append(rs.labels.haveResults + ' ' + count);
+
+        if (local.queryText) {
+            msg.empty();
+            msg.append(rs.labels.haveQueryBefore + ' ');
+            msg.append($('<span>').addClass('query-text').text(local.queryText));
+            msg.append(' ' + rs.labels.haveQueryAfter.replace('{0}', count));
+        }
+
+        msg.appendTo(c)
+        c.fadeIn();
+        //local.queryText
+
+    }
     /**
      * 
      * @param {*} data 
@@ -341,8 +393,10 @@
     function renderPager(data) {
         
         var pg = ls.results.pager;
-        if (pg.appendPager) {            
-            $(pg.container).empty();
+
+        if (pg.appendPager) {     
+            var pg_c = $(pg.container);
+            pg_c.empty();
             if(!local.pagerRendered) {
                               
 
@@ -355,8 +409,9 @@
                 }
 
             }
-            generatePagerLinks();            
-            // generatePagerText();
+            generatePagerLinks(); 
+
+            pg_c.fadeIn();
             local.pagerRendered = true;
         }        
     }
@@ -435,6 +490,10 @@
 
         var pg = ls.results.pager;
         var button = $('<a/>').text(pg.labels[type]).addClass('pager-navs').addClass('pager-' + type).attr('href','#').attr('title', pg.labels.ada[type]);
+
+        if (pg.classes[type]) {
+            button.addClass(pg.classes[type]);
+        }
 
         if(type == 'first') {
             button.data('targetPage', 1);
@@ -546,6 +605,7 @@
     //Default action when a facet is selected
     function defaultFacetSelect() {
 
+        var rs = ls.results;
         var sfs = ls.facetsApplied;
 
         if (!sfs.container)
@@ -560,7 +620,12 @@
         if (sfs.ignoreFacets.indexOf(fs[0]) != -1)
             return;
         
+        if (rs.labels.activeFacets && !local.hasActiveFacets)
+            c.prepend($('<span/>').addClass('selected-facet-label').text(rs.labels.activeFacets))
+
         var cc = null, cc_title = null, cc_titleElem = null; 
+
+
 
         if( c.find('.selected-facets-group[data-az-field="'+fs[0]+'"]').length > 0 && sfs.groupFacetsByType ) {            
             cc = c.find('.selected-facets-group[data-az-field="'+fs[0]+'"]');
@@ -580,7 +645,21 @@
             cc_titleElem = $('<span/>').addClass('selected-facets-group-title').text(cc_title).appendTo(cc);
         }    
 
-        var selectedFacet = $('<a/>').text(fs[1])
+        let facetLabel = fs[1];
+        // get facet label translation
+        $.each(ls.facetsDictionary, function (k, v) {
+            if (v.fieldName == fs[0]) {
+                if (v.translate) {
+                    // call translation function if it exists on the facet dictionary
+                    // send the field name, and the value key
+                    facetLabel = v.translate.call(this, fs[0], fs[1]);
+                }
+                return false;
+            }
+        });
+
+        var selectedFacet = $('<a/>')
+            .text(facetLabel)
             .attr({ 'href': '#' })
             .attr(sfs.extraAttributes)
             .data('value', lastFacet)
@@ -601,9 +680,11 @@
                     $(this).remove();   
                 }
 
-                if(!(c.children().not('.clear-all-facets').length > 0)) {            
-                    c.hide();
-                }              
+                if (!(c.children().not('.clear-all-facets, .selected-facet-label').length > 0)) {
+                    local.hasActiveFacets = false;
+                    local.clearAllAdded = false;
+                    c.empty().hide();
+                }               
 
                 search();
             })
@@ -611,21 +692,27 @@
             if(sfs.groupFacetsByType) {
                 selectedFacet.appendTo(cc);
             } else {
-                selectedFacet.appendTo(c);
+                if (local.clearAllAdded) {
+                    selectedFacet.insertBefore('.clear-all-facets');
+                } else {
+                    selectedFacet.appendTo(c);
+                }
+
             }
 
             
+
             // clearAll
             if(sfs.clearAll.enabled && !local.clearAllAdded) {
                 $('<a/>').text(sfs.clearAll.label)
                 .attr({ 'href': '#' })
                 .attr(sfs.extraAttributes)
                 .addClass('clear-all-facets')
-                .addClass(sfs.class)
                 .addClass(sfs.clearAll.className)
                 .on('click', function (e) {
                     e.preventDefault();
                     local.clearAllAdded = false;
+                    local.hasActiveFacets = false;
                     c.empty().hide();
                     ls.facetsSelected = [];
                     ls.searchParams.skip = 0;
@@ -634,10 +721,11 @@
                     
                     search();                
                 })
-                .prependTo(c);
+                .appendTo(c);
                 local.clearAllAdded = true;
             }
 
+            local.hasActiveFacets = true;
             c.show();
 
     }
@@ -682,10 +770,10 @@
                 c.append(w);
 
                 if(typeof ls.facetsDictionary[v] == 'object' && ls.facetsDictionary[v].dropdown) {
-                    renderFacetSelect(w, title, data, _fsNm);
+                    renderFacetSelect(w, title, data, _fsNm, ls.facetsDictionary[v]);
                 }
                 else {
-                    renderFacetList(w, title, data, _fsNm);
+                    renderFacetList(w, title, data, _fsNm, ls.facetsDictionary[v]);
                 }
                 
             }
@@ -696,7 +784,7 @@
     
     // render facet as dropdown select instead
     // of links
-    function renderFacetSelect(w, title, data, v) {
+    function renderFacetSelect(w, title, data, v, dicationary) {
         var fs = ls.facets;
         var c = $(fs.container);
 
@@ -709,10 +797,18 @@
         //Facets
         $(data["@search.facets"][v]).each(function (j, k) {
 
+            let facetLabel = k.value;
+
+            if (dicationary.translate) {
+                // call translation function if it exists on the facet dictionary
+                // send the field name, and the value key
+                facetLabel = dicationary.translate.call(this, v, k.value);
+            }
+
             //Create the facet
             var f = $('<option />')
                 // .addClass(fs.facetClass)
-                .text(k.value)
+                .text(facetLabel)
                 .attr('value', k.value);
 
             //Counter
@@ -744,7 +840,7 @@
     }
 
     // render facet list as links
-    function renderFacetList(w, title, data, v) {
+    function renderFacetList(w, title, data, v, dicationary) {
         var fs = ls.facets;
         var c = $(fs.container);
 
@@ -753,10 +849,18 @@
         //Facets
         $(data["@search.facets"][v]).each(function (j, k) {
 
+            let facetLabel = k.value;
+
+            if (dicationary.translate) {
+                // call translation function if it exists on the facet dictionary
+                // send the field name, and the value key
+                facetLabel = dicationary.translate.call(this, v, k.value);
+            }
+
             //Create the facet
             var f = $(fs.facet)
                 .addClass(fs.facetClass)
-                .html(k.value)
+                .html(facetLabel)
                 .on('click', fs.facetOnClick)
                 .data('azuresearchFacetName', v)
                 .data('azuresearchFacetValue', k.value);
@@ -807,14 +911,14 @@
         
         var df = ls.dates.fields;
 
-        if(!df.from.selector || !df.from.cloudSearchField)
+        if (!df.from.selector || !df.from.indexField)
             return;
         
         var fs = df.from.selector;
 
-        if(df.to.selector && df.to.cloudSearchField && df.from.selector) {
+        if (df.to.selector && df.to.indexField && df.from.selector) {
             fs += ', ' + df.to.selector;
-        } else if(df.to.selector && df.to.cloudSearchField ) {
+        } else if (df.to.selector && df.to.indexField ) {
             fs = df.to.selector;
         }
 
@@ -837,10 +941,13 @@
             }
         });
 
-        function handleDateInput(val,dir) {
+        function handleDateInput(val, dir) {
             local[dir] = null;
-            if(val && dir) {
-                val = df.zone ? val + " " + df.zone : val;
+            if (val && dir) {
+                var timeString = '00:00';
+                if (dir == 'toDate')
+                    timeString = '23:59';
+                val = df.zone ? val + ' ' + timeString + " " + df.zone : val + timeString;
                 var dateObj = new Date(val);
                 local[dir] = dateObj;
             } 
@@ -857,7 +964,21 @@
         
     }
 
-    function setupDateFields() {
+    // change search orderby option
+    function defaultOrderbyChange(e) {
+
+        let searchField = $(this).data('searchField');
+        let searchDir = $(this).data('searchDir');
+
+        if ($(this)[0].nodeName == 'SELECT') {
+            searchField = $(this).find(':selected').data('searchField');
+            searchDir = $(this).find(':selected').data('searchDir');
+        }
+
+        ls.searchParams.orderby = searchField + ' ' + searchDir;
+
+        search();
+
     }
 
     /**
@@ -883,7 +1004,14 @@
         $(ls.results.loaderContainer).fadeIn();
 
         // remove pager
-        $(ls.results.pager.container).empty();
+        if (ls.results.pager.container)
+            $(ls.results.pager.container).empty().fadeOut();
+
+        // results message
+
+        if (ls.results.resultsMsgContainer)
+            $(ls.results.resultsMsgContainer).empty().fadeOut();
+
         local.pagerRendered = false;
 
         if (local.waitingLatLong)
@@ -950,26 +1078,18 @@
         var date_f = "";
         if(local.dateSearch) {
             if(local.fromDate) {
-                date_f = ls.dates.fields.from.cloudSearchField + ": ['" + local.fromDate.toISOString() + "'";           
+                date_f = ls.dates.fields.from.indexField + ' ge ' + local.fromDate.toISOString();           
             } 
 
-            if(local.toDate && ls.dates.fields.from.cloudSearchField == ls.dates.fields.to.cloudSearchField) {
-                if(!local.fromDate) {
-                    date_f += ls.dates.fields.to.cloudSearchField + ":{"; 
-                }
-                date_f += ",'" + local.toDate.toISOString() + "']";
-            } else if(local.toDate) {
-                if(local.fromDate) {
-                    date_f += ",} "; 
-                }
-                date_f += ls.dates.fields.to.cloudSearchField + ":{"; 
-                date_f += ",'" + local.toDate.toISOString() + "']";                
-            } else if(local.fromDate) {
-                date_f += ",}"; 
+            if (local.toDate) {
+                if (local.fromDate)
+                    date_f += ' ' + ls.facets.searchMode + ' ';
+                date_f += ls.dates.fields.to.indexField + ' le ' + local.toDate.toISOString();           
             }            
 
             if (f) {
-                f += " " + date_f;
+                f += ' ' + ls.facets.searchMode + ' ' + date_f;
+                
             } else {
                 f = date_f;
             }
@@ -1003,7 +1123,7 @@
     }
 
 
-
+    // resolve address text to Lat/Lng values from geocoding api
     function resolveAddress(address) {
         var s = ls.googleGeocodeApi;
 
@@ -1045,6 +1165,7 @@
         return dist;
     }
 
+    // Log messages to console when debug enabled.
     function debug(obj) {
         if (ls.debug && window.console && window.console.log) {
             window.console.log(obj);
@@ -1072,6 +1193,7 @@
         return null;
     };
 
+    // Check the configured url parameters for values
     function checkUrlParameters() {
         var s = ls.urlParameters;
 
@@ -1096,10 +1218,13 @@
 
         //Apply Parameters
         if (search) {
-            ls.searchParams.search = search;
+            // escape double quotes if they are at the beginning or end of the search string
+            ls.searchParams.search = search.replace(/[\"]{1}/gi, '\\"');
+            //ls.searchParams.search = encodeURIComponent(search);
+            local.queryText = search;   
         }
 
-        if(page) {
+        if (page && ls.results.pager.updateHistory) {
             local.currentPage = Math.floor(parseFloat(page));
             if(ls.results.pager.loadMore) {
                 ls.searchParams.skip = 0;
@@ -1129,6 +1254,7 @@
 
     }
 
+    // update the current page query string for active facets
     function updateFacetHistory() {
             
         var facetParam, urlInit, urlNew, facetString, updatedHistoryUrl;
@@ -1164,6 +1290,7 @@
         window.history.replaceState( { 'url' : updatedHistoryUrl }, '', updatedHistoryUrl );     
     }
 
+    // update the current page query string for pagination
     function updatePageHistory() {
         
         var urlInit, urlNew, pageParam, pageVal, updatedHistoryUrl;
@@ -1192,8 +1319,6 @@
         // push the new search query string to the browser history
         window.history.replaceState( { 'url' : updatedHistoryUrl }, 'page', updatedHistoryUrl );     
     }
-
-
 
     //append or update query string parameters
     function updateUrlParameter(uri, key, value) {
