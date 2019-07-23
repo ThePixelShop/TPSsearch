@@ -14,7 +14,7 @@
             suggesterName: null, // name of suggester configured on azure
             fuzzy: false, // provide more suggestions using 'fuzzy' search
             searchFields: null, // fields to search (must be defined as 'SourceFields' for suggester on azure)
-            select: null, // fields to return from the index
+            select: 'pagename,nodealiaspath', // fields to return from the index
             top: null, // number of suggestions to return
             filter: null, // filter suggestions using odata filter syntax
             orderby: null, // // SUGGETER ONLY : order suggestion results
@@ -63,9 +63,21 @@
             if (inputData['azureSearchSuggesterFields'])
                 ls.searchParams.searchFields = inputData['azureSearchSuggesterFields'];
 
+            // Select what index fields should be returned
+            if (inputData['azureSearchSuggesterSelect'])
+                ls.searchParams.select = inputData['azureSearchSuggesterSelect'];
+
+            // Use fuzzy search
+            if (inputData['azureSearchSuggesterFuzzy'])
+                ls.searchParams.fuzzy = inputData['azureSearchSuggesterFuzzy'];
+
             // Select suggster
             if (inputData['azureSearchSuggester'])
                 ls.searchParams.suggesterName = inputData['azureSearchSuggester'];
+
+            // API Key
+            if (inputData['azureSearchSuggesterApiKey'])
+                ls.azureSearch.key = inputData['azureSearchSuggesterApiKey'];
 
             // Construct API Url
             if (inputData['azureSearchSuggesterApiEndpoint'] && inputData['azureSearchSuggesterType'] && inputData['azureSearchSuggesterApiVersion'])
@@ -75,8 +87,10 @@
             if (inputData['azureSearchSuggesterApiKey'])
                 ls.azureSearch.key = inputData['azureSearchSuggesterApiKey'];
 
+            
+
             //buildAutoComplete();
-            //setupListeners();
+            setupListeners();
 
         } else {
             debug('you have not provided an input field');
@@ -112,15 +126,45 @@
 
     function setupListeners() {
 
-        
+        if (aria.ListboxCombobox) {
+            console.log('have aria combobox!');
+            buildAutoComplete();
+
+            local.combobox = new aria.ListboxCombobox(
+                local.wrapper[0], // parent element
+                local.input[0], // text input
+                local.suggestionList[0], // list container for options
+                function (t) {
+                    var r_arr = [];
+                    var results = getSuggestions(t).done(function (d, e) {
+                        
+                        if (e == 'success') {
+                            $.each(d.value, function (k, v) {
+                                r_arr.push(v.pagename);
+                            });
+                        }
+                        return r_arr;
+                    });
+                    return results.then(function () {
+                        console.log(r_arr);
+                        return r_arr;
+                    });
+                    
+                }, // search function
+                true // auto select boolean
+            );     
+        }
+        else if ($.fn.autocomplete) {
+            console.log('have autocomplete!');
+        }
 
     }
 
     function buildAutoComplete() {
+        console.log('buildAutoComplete()');
 
         local.wrapper = $(local.input).parent().addClass('azure-suggestions-wrapper');
         local.suggestionList = $('<ul/>').addClass('azure-suggestions-list')
-
         local.suggestionList.appendTo(local.wrapper);
 
     }
@@ -129,7 +173,6 @@
         
         debug(this);
     }
-
 
     function checkHide(e) {
         if (e.target === local.input || local.suggestionList.contains(e.target)) {
