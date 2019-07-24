@@ -14,7 +14,7 @@
             suggesterName: null, // name of suggester configured on azure
             fuzzy: false, // provide more suggestions using 'fuzzy' search
             searchFields: null, // fields to search (must be defined as 'SourceFields' for suggester on azure)
-            select: 'pagename,nodealiaspath', // fields to return from the index
+            select: '*', // fields to return from the index
             top: null, // number of suggestions to return
             filter: null, // filter suggestions using odata filter syntax
             orderby: null, // // SUGGETER ONLY : order suggestion results
@@ -47,14 +47,13 @@
     }
 
     // 
-    $.fn.azuresuggester = function (action, options) {
+    $.fn.azuresuggester = function (options) {
 
         local.input = this;
 
         if ($(local.input).length > 0 && !local.initialized) {
 
             var inputData = local.input.data();
-
             // set options based on data attributes
             if (inputData['azureSearchSuggesterFilter'])
                 ls.searchParams.filter = inputData['azureSearchSuggesterFilter'];
@@ -81,13 +80,7 @@
 
             // Construct API Url
             if (inputData['azureSearchSuggesterApiEndpoint'] && inputData['azureSearchSuggesterType'] && inputData['azureSearchSuggesterApiVersion'])
-                ls.azureSearch.url = inputData['azureSearchSuggesterApiEndpoint'] + inputData['azureSearchSuggesterType'] + '?api-version=' + inputData['azureSearchSuggesterApiVersion'];
-
-            // API Key
-            if (inputData['azureSearchSuggesterApiKey'])
-                ls.azureSearch.key = inputData['azureSearchSuggesterApiKey'];
-
-            
+                ls.azureSearch.url = inputData['azureSearchSuggesterApiEndpoint'] + inputData['azureSearchSuggesterType'] + '?api-version=' + inputData['azureSearchSuggesterApiVersion'];       
 
             //buildAutoComplete();
             setupListeners();
@@ -95,12 +88,6 @@
         } else {
             debug('you have not provided an input field');
             return false;
-        }
-
-        if (methods[action]) {
-
-            return methods[action].apply(this, Array.prototype.slice.call(arguments, 1));
-
         }
 
         if (options && typeof options === 'object') {
@@ -126,42 +113,91 @@
 
     function setupListeners() {
 
-        if (aria.ListboxCombobox) {
-            console.log('have aria combobox!');
+        if (typeof aria != 'undefined' && typeof aria.ListboxCombobox != 'undefined') {
             buildAutoComplete();
-
             local.combobox = new aria.ListboxCombobox(
                 local.wrapper[0], // parent element
                 local.input[0], // text input
                 local.suggestionList[0], // list container for options
                 function (t) {
-                    var r_arr = [];
-                    var results = getSuggestions(t).done(function (d, e) {
-                        
-                        if (e == 'success') {
-                            $.each(d.value, function (k, v) {
-                                r_arr.push(v.pagename);
-                            });
-                        }
-                        return r_arr;
-                    });
-                    return results.then(function () {
-                        console.log(r_arr);
-                        return r_arr;
-                    });
-                    
+                    // var r_arr;
+                    // getSuggestions(t).then(function(d, s, jqXHR) {
+                    //     r_arr = [];
+                    //     $.each(d.value, function (k, v) {
+                    //         r_arr.push(v.documentname);
+                    //     });
+                    //     return r_arr;
+                    // }, 
+                    // function( jqXHR, s, err ) {
+                    //     console.log(s);
+                    //     return false;
+                    // }); 
+
+                    // var _int = setInterval(function() {
+                    //     console.log(typeof r_arr);
+                    //     console.log(r_arr);
+                    //     if(typeof r_arr !== undefined && r_arr.length > 0) {
+                    //         clearInterval(_int)
+                    //         return r_arr;
+                    //     } else if (r_arr === false) {
+                    //         clearInterval(_int)
+                    //         return [];
+                    //     }
+                    // }, 50);
                 }, // search function
-                true // auto select boolean
+                false, // auto select boolean
+                function() {
+
+                },
+                function() {
+
+                },
+
             );     
         }
         else if ($.fn.autocomplete) {
             console.log('have autocomplete!');
+            
+            local.input.autocomplete({
+                autofocus: true,
+                appendTo: local.input.parent(),
+                source : function(req, resp) {
+                    getSuggestions(req.term).then(function(d){
+                        var vals = [];
+                        $.each(d.value,function(k,v) {
+                            var obj = {};
+                            obj['label'] = v.documentname;
+                            // obj['value'] = v.nodealiaspath;
+                            obj['foo'] = v.nodealiaspath;
+                            vals.push(obj);
+                        })
+                        // console.log(d);
+                        // console.log(vals);
+                        resp(vals);
+                    });
+
+                },
+                select: function(e,item) {
+                    console.log(e);
+                    console.log(item);
+                }
+            }).data('ui-autocomplete')._renderItem = function (ul, item) {
+                
+                return $( "<li>" ).append( item.label ).appendTo( ul );
+
+                // var that = this;                
+                // $.each(items, function (index, item) {
+                //     that._renderItemData(ul, item);
+                // });
+
+            };
+
+               
         }
 
     }
 
-    function buildAutoComplete() {
-        console.log('buildAutoComplete()');
+    function buildAutoComplete(classname) {
 
         local.wrapper = $(local.input).parent().addClass('azure-suggestions-wrapper');
         local.suggestionList = $('<ul/>').addClass('azure-suggestions-list')
@@ -172,17 +208,6 @@
     function processResults() {
         
         debug(this);
-    }
-
-    function checkHide(e) {
-        if (e.target === local.input || local.suggestionList.contains(e.target)) {
-            return;
-        }
-        this.hideListbox();
-    }
-
-    function hideListbox() {
-
     }
 
     /**
@@ -209,10 +234,10 @@
             "data": JSON.stringify(ls.searchParams)
         }
 
-        return $.ajax(settings).done(function (response) {
-            ls.onResults.call(response, local);
+        return $.ajax(settings).then(function(d){
+            ls.onResults.call(d, local);
+            return d;
         });
-
 
     }
 

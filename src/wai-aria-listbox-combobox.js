@@ -88,13 +88,15 @@ aria.ListboxCombobox.prototype.updateResults = function (shouldShowAll) {
     if (searchString && searchString.length > 0) 
         results = this.searchFn(searchString);
 
+    console.log(results);
+
     this.hideListbox();
 
     if (!shouldShowAll && !searchString) {
         results = [];
     }
 
-    if (results.length) {
+    if (results && results.length) {
         for (var i = 0; i < results.length; i++) {
             var resultItem = document.createElement('li');
             resultItem.className = 'result';
