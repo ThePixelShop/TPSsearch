@@ -13,7 +13,7 @@
   "author": "The Pixel Shop",
   "license": "ISC",
   "devDependencies": {
-    "browser-sync": "^2.24.5",
+    "browser-sync": "^3.0.2",
     "gulp": "^3.9.1",
     "gulp-autoprefixer": "^5.0.0",
     "gulp-concat": "^2.6.1",
