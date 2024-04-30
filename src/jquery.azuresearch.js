@@ -4,7 +4,12 @@
     var ls = {
         azureSearch: {
             url: "",
-            key: ""
+            key: "",
+            isFuzzy: false,
+            fuzzyProximity: 0,
+            isWildcard: false,
+            useTermProximity: false,
+            termProximityDistance: 0,
         },
         googleGeocodeApi: {
             key: null,
@@ -26,7 +31,8 @@
             top: null,
             skip: 0,
             filter: null,
-            orderby: null
+            orderby: null,
+            queryType: 'full'
         },
         dates: {
             hasDates: false,
@@ -44,6 +50,7 @@
         },
         facets: {
             facet: '<a href=\"#\"/>',
+            facetAltText: 'Filter results by ',
             facetClass: 'facet',
             titleWrapper: "<h2/>",
             title: "<a href=\"#\"/>",
@@ -63,7 +70,10 @@
             onFacetSelect: defaultFacetSelect,
             groupWrapper: '<div/>',
             groupWrapperClass: 'group',
-            emptyFacetText: '(none)'
+            emptyFacetText: '(none)',
+            // optional functions to sort & translate
+            sortFacets: null,
+            translateFacets: null
         },
         facetsApplied: {
             container: null,
@@ -75,12 +85,12 @@
             clearAll: {
                 enabled: true,
                 label: 'Clear all',
-                className: '',                
+                className: ''             
             },  
             onChange: function () { }
         },
-        facetsDictionary: null,
-        //Array containing facetname|facetvalue
+        facetsDictionary: [],
+        // Array containing facetname|facetvalue|translation_key
         facetsSelected: [],
         results: {
             container: '#results',
@@ -88,13 +98,17 @@
             noResultsClasses: '',
             onCreate: function () { },
             loaderContainer: null,
+            resultsMsgContainer: null,
             pager: {
                 container: null,
                 loadMore: true,
+                infinite: false,
+                infiniteClick: false,
                 appendPager: false,
                 pageSize: 50,
                 pagerRangeIncrement: 5,
-                enders: true,
+                pagerItems: true,
+                pagerEnders: false,
                 updateHistory: false,
                 labels: {
                     prev: 'Previous',
@@ -117,17 +131,16 @@
                     next: '',
                     last: '',
                     results: '',
-                    load: '',
+                    load: ''
                 },
                 onRender: function () { },
-                onPageChange: function () { },
+                onPageChange: function () { }
             },
             labels: {
                 activeFacets: "Filters",
                 noResults: 'Sorry there are no results for your query',
-                haveResults: 'Results Found',
-                haveQueryBefore: 'Your search for',
-                haveQueryAfter: 'returned {0} results'
+                haveResults: 'Results Found {count}',
+                haveQuery: 'Your search for {query} returned {count}',
             }
         },
         urlParameters: {
@@ -137,7 +150,7 @@
             latlong: null,
             search: 'q',
             facets: 'fc',
-            page: 'p',
+            page: 'p'
         },
         orderbyOptions: {
             orderbySelector: null,
@@ -156,17 +169,22 @@
         currentPage: 1,
         pagerRange: [],
         pagerRendered: false,
+        pagerListenersAdded: false,
+        pagerInifiniteClicked: false,
         waitingLatLong: false,
         isGeoSearch: false,
         totalResults: 0,
         initialized: false,
         rendered: false,
+        dateSearch: false,
         fromDate: null,
         toDate: null,
         clearAllAdded: false,
         queryText: null,
         hasActiveFacets: false,
-    }
+        returnedParams: null,
+        additionalFacetsDictionary: []
+    };
 
     /**
      * jQuuery Plugin Definition
@@ -180,6 +198,8 @@
 
         if (options) {
             //Default options.
+            if (options.azureSearch)
+                options.azureSearch = $.extend(ls.azureSearch, options.azureSearch);
             if (options.googleGeocodeApi) 
                 options.googleGeocodeApi = $.extend(ls.googleGeocodeApi, options.googleGeocodeApi);
             if (options.geoSearch) 
@@ -203,22 +223,23 @@
 
             ls.searchParams.top = ls.results.pager.pageSize;
 
+            local.currentPage = (ls.searchParams.skip / ls.searchParams.top) + 1;
+
+            local.clearAllAdded = $(ls.facetsApplied.container).length > 0 && $(ls.facetsApplied.container).children('.clear-all-facets').length > 0;
+
+            local.queryText = ls.searchParams.search;
+
             checkUrlParameters();
         }
 
-        if (!local.initialized) {
-            //Check active facets
-            $(ls.facetsSelected).each(function (i, v) {
-                ls.facets.onFacetSelect.call([v]);
-            });
-
-            if (ls.orderbyOptions.orderbySelector) {
-                $(document).on(ls.orderbyOptions.orderbyEvent, ls.orderbyOptions.orderbySelector, ls.orderbyOptions.onOrderbyChange);
-            }
-        }
-
+        // we will reset the local date value
+        // because sometimes the date can be cleared
+        // by another function
+        local.fromDate = null;
+        local.toDate = null;
+        local.dateSearch = false;
         
-        if(ls.dates.hasDates) {
+        if (ls.dates.hasDates) {
             setupDateFields();
         }
 
@@ -233,6 +254,21 @@
                 break;
         }
 
+        if (!local.initialized) {
+            //Check active facets
+            $(ls.facetsSelected).each(function (i, v) {
+                ls.facets.onFacetSelect.call([v]);
+            });
+
+            if (ls.orderbyOptions.orderbySelector) {
+                $(document).on(ls.orderbyOptions.orderbyEvent, ls.orderbyOptions.orderbySelector, ls.orderbyOptions.onOrderbyChange);
+            }
+        }
+
+        // setup public functions
+
+        this.loadAdditionalFacets = loadFacets;
+
         local.initialized = true;
 
         // return
@@ -244,14 +280,13 @@
      * Handlers
      */
 
-
     function processAddress(data) {
         debug('Google Geocode return:');
         debug(data);
 
         var ret = null;
 
-        if (data.status == "OK" && data.results.length > 0) {
+        if (data.status === "OK" && data.results.length > 0) {
             ls.geoSearch.lat = data.results[0].geometry.location.lat;
             ls.geoSearch.lng = data.results[0].geometry.location.lng;
         }
@@ -266,7 +301,7 @@
         loadFacets(data);
         loadResults(data);
         // render pager  
-        if(data['@odata.count'] > ls.results.pager.pageSize) {
+        if (data['@odata.count'] > ls.results.pager.pageSize) {
             renderPager(data);
         }    
         ls.onLoad.call(data, local);
@@ -288,26 +323,29 @@
         renderResultsMessage(data['@odata.count']);
 
         //Clear the container if skip is 0 or if the clear is forced by setting
-        if (!rs.pager.loadMore || ls.searchParams.skip == 0)
+        if ((!rs.pager.loadMore && !rs.pager.infinite) || ls.searchParams.skip === 0)
             c.html('');
 
-        if(data['@odata.count'] == 0) {
+            if (rs.pager.infinite && !local.rendered)
+                c.attr('role', 'feed').attr('aria-busy', 'true');
+
+        if (data['@odata.count'] === 0) {
 
             // hide Loader
-            if(ldr)
+            if (ldr)
                 ldr.fadeOut();
             $('<div/>').addClass('search-no-results ' + rs.noResultsClasses).text(rs.labels.noResults).appendTo(c);
         }
 
         $(data["value"]).each(function (i, v) {
-
+            var itemIndex = i;
             //Populate the results
             if (!rs.template) {
                 //Without a template, just display all the fields with some content
-                var l = $('<ul/>')
+                var l = $('<ul/>');
                 var hr = $('<hr/>');
                 $(Object.keys(v)).each(function (j, k) {
-                    if (!v[k] || v[k] == '')
+                    if (!v[k] || v[k] === '')
                         return true;
                     var item = $('<li/>').text(k + ' : ').appendTo(l);
                     $('<strong/>').text(v[k]).appendTo(item);
@@ -319,13 +357,13 @@
                 rs.onCreate.call(l);
             } else {
                 //With template
-                var t = $(rs.template);
+                var t = $('<div>' + rs.template + '</div>');
                 $(':not([data-search-field=""])', t).each(function (y, z) {
                     var field = $(z).data('searchField');
                     var value = '';
                     if (field && v[field]) {
                         value = v[field];
-                    } else if (field == ls.geoSearch.fieldName && local.isGeoSearch) {
+                    } else if (field === ls.geoSearch.fieldName && local.isGeoSearch) {
                         if (v[ls.geoSearch.azureFieldName]) {
                             var geo = v[ls.geoSearch.azureFieldName];
                             value = distance(
@@ -338,10 +376,10 @@
                     //Format the data using the provided Callback function
                     var format = $(z).data('searchValueFormat');
                     if (format && window[format])
-                        value = window[format](value, v);
+                        value = window[format](value, v, i);
 
                     if (field) {                        
-                        if(typeof $(z).data('searchValueFormatReplace') !== 'undefined') {
+                        if (typeof $(z).data('searchValueFormatReplace') !== 'undefined') {
                             $(z).replaceWith(value);
                         } else {
                             $(z).html(value);
@@ -349,9 +387,10 @@
                     }
 
                 });
-                c.append(t);
+
+                c.append(t.children());
                 // fade out loader
-                if(ldr)
+                if (ldr)
                     ldr.fadeOut();
 
                 //Callback on create
@@ -359,36 +398,74 @@
             }
         });
 
+        if (rs.pager.infinite)
+            c.attr('aria-busy', 'false');
+
         c.fadeIn();
         local.rendered = true;
 
     }
+
 
     function renderResultsMessage(count) {
 
         var rs = ls.results;
         var c = $(rs.resultsMsgContainer);
 
-        if (!c)
+        if (!c) {
             return;
-
-        var msg = $('<span/>').append(rs.labels.haveResults + ' ' + count);
-
-        if (local.queryText) {
-            msg.empty();
-            msg.append(rs.labels.haveQueryBefore + ' ');
-            msg.append($('<span>').addClass('query-text').text(local.queryText));
-            msg.append(' ' + rs.labels.haveQueryAfter.replace('{0}', count));
         }
 
-        msg.appendTo(c)
-        c.fadeIn();
-        //local.queryText
+        c.empty();
+
+        var cText = '<span class="query-count">' + count + '</span>';
+        var sText = '<span class="page-count">' + local.currentPage * rs.pager.pageSize + '</span>';
+                
+        var pBottom = local.currentPage;
+        var pTop = local.currentPage * rs.pager.pageSize;
+        if (pBottom > 1) {
+            pBottom = (local.currentPage - 1) * rs.pager.pageSize;
+        }
+        if (pTop > local.totalResults) {
+            pTop = local.totalResults;
+        }
+
+        var pBottomText = '<span class="page-count">' + pBottom + '</span>';
+        var pTopText = '<span class="page-count">' + pTop + '</span>';
+
+        var msgText = rs.labels.haveResults;
+
+        if (local.queryText || local.queryTextName) {
+
+            var qText = '<span class="query-text">' + jsEscapeSearchTerm(local.queryText) + '</span>';
+            var nText = '<span class="query-text">' + jsEscapeSearchTerm(local.queryTextName) + '</span>';
+
+            //var msgText = '';
+            if (local.queryText && local.queryTextName) {
+                msgText = rs.labels.haveQueryAndName;
+            } else if (local.queryText && !local.queryTextName) {
+                msgText = rs.labels.haveQuery;
+            } else if (!local.queryText && local.queryTextName) {
+                msgText = rs.labels.haveName;
+            }
+            msgText = msgText.replace('{name}', nText).replace('{query}', qText);
+        }
+
+        msgText = msgText.replace('{count}', cText).replace('{showing}', sText).replace('{currPage}', local.currentPage).replace('{totalPages}', local.totalPages).replace('{pbottom}', pBottomText).replace('{ptop}', pTopText);
+        
+        var msg = $('<span/>').append(msgText);
+
+        c.empty().fadeOut(function () {
+            msg.appendTo(c);
+            c.fadeIn();
+        });
 
     }
+    
     /**
      * 
-     * @param {*} data 
+     * @param {*} data is the response data from azure
+     * 
      */
     function renderPager(data) {
         
@@ -397,15 +474,15 @@
         if (pg.appendPager) {     
             var pg_c = $(pg.container);
             pg_c.empty();
-            if(!local.pagerRendered) {
-                              
+
+            if (!local.pagerRendered) {
 
                 local.pagerRange[0] = 1;
-                local.pagerRange[1] = pg.pagerRangeIncrement 
+                local.pagerRange[1] = pg.pagerRangeIncrement;
 
-                if(local.currentPage >= pg.pagerRangeIncrement) {
-                    local.pagerRange[0] = Math.floor(local.currentPage/pg.pagerRangeIncrement) * pg.pagerRangeIncrement;
-                    local.pagerRange[1] = (Math.floor(local.currentPage/pg.pagerRangeIncrement) + 1) * pg.pagerRangeIncrement;
+                if (local.currentPage >= pg.pagerRangeIncrement) {
+                    local.pagerRange[0] = Math.floor(local.currentPage / pg.pagerRangeIncrement) * pg.pagerRangeIncrement;
+                    local.pagerRange[1] = (Math.floor(local.currentPage / pg.pagerRangeIncrement) + 1) * pg.pagerRangeIncrement;
                 }
 
             }
@@ -428,94 +505,103 @@
             return;
 
         
-        if(pg.loadMore) {
+        if (pg.loadMore || pg.infinite) {
             
             c.append(addPagerButton('load'));
             
         } else {         
-            var items;
-            if(pg.enders) {
+            var items = '';
+            if (pg.pagerEnders) {
                 c.append(addPagerButton('first'));
             }
             c.append(addPagerButton('prev'));
 
-            if(!local.pagerRendered) {
-                items = $('<div/>').addClass('pager-nav-items');
-            } else {
-                items = $('.pager-nav-items').empty();
-            }
-
-            var i = local.pagerRange[0];
-            while(i <= local.pagerRange[1] && i <= local.totalPages) {
-                var pagerLink = $('<a href="#">').data('targetPage',i);
-                if(i === local.currentPage) {
-                    pagerLink = $('<span></span>');
-                    pagerLink.attr('title', pg.labels.ada.current + ' ' + i);
+            if (pg.pagerItems) {
+                if(!local.pagerRendered) {
+                    items = $('<div/>').addClass('pager-nav-items');
                 } else {
-                    pagerLink.attr('title', pg.labels.ada.item + ' ' + i);
+                    items = $('.pager-nav-items').empty();
                 }
-                pagerLink.text(i);
-                items.append(pagerLink);
-                i++;
+
+                var i = local.pagerRange[0];
+                while(i <= local.pagerRange[1] && i <= local.totalPages) {
+                    var pagerLink = $('<a href="#">').data('targetPage', i);
+                    if(i === local.currentPage) {
+                        pagerLink = $('<span>').addClass('pager-nav-item-current');
+                        pagerLink.attr('title', pg.labels.ada.current + ' ' + i);
+                    } else {
+                        pagerLink.attr('title', pg.labels.ada.item + ' ' + i);
+                    }
+                    pagerLink.addClass('pager-nav-item').text(i);
+                    items.append(pagerLink);
+                    i++;
+                }
             }
 
-            if( !c ) {                
+            if (!c) {                
                 c.append(addPagerButton('next'));
-                if(pg.enders) {
+                if (pg.pagerEnders) {
                     c.append(addPagerButton('last'));
                 }
-                $(local.container).after(c)
+                $(local.container).after(c);
             } else {
                 c.append(items);            
                 c.append(addPagerButton('next'));
-                if(pg.enders) {
+                if (pg.pagerEnders) {
                     c.append(addPagerButton('last'));
                 }
             } 
 
         }
 
-        if(!local.pagerRendered) {
+        if (!local.pagerListenersAdded) {
             addPagerListeners();
         }
 
         // c;
-    };
+    }
 
     /**
      * 
-     * @param {*} type 
+     * @param {string} type what type of pager button
+     * 
      */
     function addPagerButton(type) {
 
         var pg = ls.results.pager;
-        var button = $('<a/>').text(pg.labels[type]).addClass('pager-navs').addClass('pager-' + type).attr('href','#').attr('title', pg.labels.ada[type]);
+        var button = $('<a/>').addClass('pager-navs').addClass('pager-' + type).attr('href', '#').attr('title', pg.labels.ada[type]);
+
+        button.append($('<span/>').addClass('pager-navs-label').text(pg.labels[type]));
 
         if (pg.classes[type]) {
             button.addClass(pg.classes[type]);
         }
 
-        if(type == 'first') {
+        if (type === 'first') {
             button.data('targetPage', 1);
-        } else if (type == 'last') {
+        } else if (type === 'last') {
             button.data('targetPage', local.totalPages);
         }
 
         //button;
-        if(local.pagerRendered) {
+        if (local.pagerRendered) {
             button = $('.pager-navs.pager-' + type);
         }
+
+        if (pg.infinite && (local.pagerInifiniteClicked || !pg.infiniteClick)) {
+            button.addClass('pager-load-infinite');
+        }
         
-        if (type == 'prev' || type == 'first') {
+        if (type === 'prev' || type === 'first') {
             if (local.currentPage > 1) {
                 button.data('disabled', false).removeClass('disabled');
             } else {
                 button.data('disabled', true).addClass('disabled');
             }
         } else {
-            if(local.totalPages > local.currentPage) {
+            if (local.totalPages > local.currentPage) {
                 button.data('disabled', false).removeClass('disabled');
-            }  else {
+            } else {
                 button.data('disabled', true).addClass('disabled');
             }        
         }
@@ -529,24 +615,57 @@
      */
     function addPagerListeners() {
 
-        $('.pager-prev, .pager-next, .pager-load').on('click', function(e){
-            e.preventDefault();
-            if( !$(this).data('disabled') ) {
-                handlePager($(this).hasClass('pager-prev'));
-            }
-        });
+        var pg = ls.results.pager;
+        //var c = $(pg.container);
 
-        $('.pager-last, .pager-first').on('click', function(e){
-            e.preventDefault();
-            if( !$(this).data('disabled') ) {                
+        if (pg.loadMore || pg.infinite) {
+
+            $(document).on('click', '.pager-load', function (e) {
+                e.preventDefault();
+                if (!$(this).data('disabled')) {
+                    handlePager($(this).hasClass('pager-prev'));
+                    if (pg.infinite && pg.infiniteClick) {
+                        local.pagerInifiniteClicked = true;
+                    }
+                }
+            });
+
+            if (pg.infinite) {
+
+                var scrollTrigger = $('.pager-load');
+
+                if (!pg.infiniteClick) {
+                    local.pagerInifiniteClicked = true;
+                }
+
+                $(window).on('resize scroll', function () {
+
+                    if (isInViewport(scrollTrigger, 150) && local.pagerInifiniteClicked && !scrollTrigger.data('disabled')) {
+                        handlePager(scrollTrigger.hasClass('pager-prev'));
+                    }
+                });
+            }
+
+        } else {
+            $(document).on('click', '.pager-prev, .pager-next', function (e) {
+                e.preventDefault();
+                if (!$(this).data('disabled')) {
+                    handlePager($(this).hasClass('pager-prev'));
+                }
+            });
+            $(document).on('click', '.pager-last, .pager-first', function (e) {
+                e.preventDefault();
+                if (!$(this).data('disabled')) {
+                    skipToPage($(this).data('targetPage'));
+                }
+            });
+            $(document).on('click', '.pager-nav-items a', function (e) {
+                e.preventDefault();
                 skipToPage($(this).data('targetPage'));
-            }
-        });
+            });
+        }
 
-        $('.pager-nav-items a').on('click',function(e){
-            e.preventDefault();
-            skipToPage($(this).data('targetPage'));
-        });
+        local.pagerListenersAdded = true;
     }
 
     /**
@@ -556,16 +675,16 @@
     function handlePager(next) {
         var pg = ls.results.pager; 
 
-        if(ls.results.pager.pageSize && local.currentPage && local.rendered) {        
+        if (pg.pageSize && local.currentPage && local.rendered) {        
             local.rendered = false;                
             // go to next page of results
-            if(!next) {
+            if (!next) {
                 local.currentPage = local.currentPage + 1;
             } else {
                 local.currentPage = local.currentPage - 1;
             }
             
-            ls.searchParams.skip = (local.currentPage - 1) * ls.results.pager.pageSize; 
+            ls.searchParams.skip = (local.currentPage - 1) * pg.pageSize; 
 
             search();
         }
@@ -585,21 +704,37 @@
     function defaultFacetChange(e) {
         e.preventDefault();
 
-        var value = $(this).data('azuresearchFacetName') + '||' + $(this).data('azuresearchFacetValue');
+        var fN = $(this).data('azuresearchFacetName');
+        var fV = $(this).val() ? $(this).val() : $(this).data('azuresearchFacetValue');
+        var fTf = $(this).data('azuresearchFacetTranslationField');
+        var fTk = $(this).data('azuresearchFacetTranslationKey');
+        var fop = $(this).data('azuresearchFacetOperator');
 
-        if(e.target.nodeName == 'SELECT') {
-            value = $(this).data('azuresearchFacetName') + '||' + $(this).val();
+
+        var value = fop + '||' + fN + '||' + fV;
+
+        if (fTf && fTk)
+            value += '||' + fTf + '||' + fTk;
+
+        // if the facet is a checkbox and we are unchecking it:
+        if (e.type === 'change' && e.target.type === 'checkbox' && $(this).prop('checked') === false) {
+            var sfs = ls.facetsApplied;
+            removeFacet($('.' + sfs.class + '[data-value="' + value + '"]'));
+        }
+        // otherwise add the facet to the search
+        else {
+
+            if (ls.facetsSelected.indexOf(value) !== -1)
+                return;
+
+            ls.facetsSelected.push(value);
+            ls.facetsApplied.onChange.call(ls.facetsSelected.slice(0));
+            ls.facets.onFacetSelect.call(ls.facetsSelected.slice(0));
+            ls.searchParams.skip = 0;
+            local.currentPage = 1;
+            search();
         }
 
-        if (ls.facetsSelected.indexOf(value) != -1)
-            return;
-
-        ls.searchParams.skip = 0;
-        local.currentPage = 1;
-        ls.facetsSelected.push(value);
-        ls.facetsApplied.onChange.call(ls.facetsSelected.slice(0));
-        ls.facets.onFacetSelect.call(ls.facetsSelected.slice(0));
-        search();
     }
 
     //Default action when a facet is selected
@@ -607,6 +742,7 @@
 
         var rs = ls.results;
         var sfs = ls.facetsApplied;
+        var fs = ls.facets;
 
         if (!sfs.container)
             return;
@@ -614,30 +750,36 @@
         var lastFacet = this.pop();
         var c = $(sfs.container);
 
-        var fs = lastFacet.split('||');
+        var lf = lastFacet.split('||');
+
+        debug(lf);
 
         //Ignore if necessary
-        if (sfs.ignoreFacets.indexOf(fs[0]) != -1)
+        if (sfs.ignoreFacets.indexOf(lf[1]) !== -1)
             return;
         
         if (rs.labels.activeFacets && !local.hasActiveFacets)
-            c.prepend($('<span/>').addClass('selected-facet-label').text(rs.labels.activeFacets))
+            c.prepend($('<span/>').addClass('selected-facet-label').text(rs.labels.activeFacets));
 
         var cc = null, cc_title = null, cc_titleElem = null; 
 
+        var azField = lf[1];
+        // get all facet dictionaries:
+        var combinedFacetDictionary = ls.facetsDictionary.concat(local.additionalFacetsDictionary);
 
+        if (c.find('.selected-facets-group[data-az-field="' + azField + '"]').length > 0 && sfs.groupFacetsByType) {            
+            cc = c.find('.selected-facets-group[data-az-field="' + azField + '"]');
+        } else if (sfs.groupFacetsByType) {                        
+            cc = $('<div/>').addClass('selected-facets-group').attr('data-az-field', azField).appendTo(c);
+                        
+            cc_title = azField;
 
-        if( c.find('.selected-facets-group[data-az-field="'+fs[0]+'"]').length > 0 && sfs.groupFacetsByType ) {            
-            cc = c.find('.selected-facets-group[data-az-field="'+fs[0]+'"]');
-        } else if ( sfs.groupFacetsByType ) {                        
-            cc = $('<div/>').addClass('selected-facets-group').attr('data-az-field',fs[0]).appendTo(c);
-            //cc_title = ls.facetsDictionary && ls.facetsDictionary[fs[0]] ? ls.facetsDictionary[fs[0]] : v;
-            
-            cc_title = fs[0];
             // get facet label based on facet field:
-            $.each(ls.facetsDictionary, function(k,v) {
-                if(v.fieldName == fs[0]) {
+            $.each(combinedFacetDictionary, function (k, v) {
+                if (v.fieldName === lf[1]) {
                     cc_title = v.label;
+                    return;
+                } else {
                     return false;
                 }
             });
@@ -645,18 +787,13 @@
             cc_titleElem = $('<span/>').addClass('selected-facets-group-title').text(cc_title).appendTo(cc);
         }    
 
-        let facetLabel = fs[1];
-        // get facet label translation
-        $.each(ls.facetsDictionary, function (k, v) {
-            if (v.fieldName == fs[0]) {
-                if (v.translate) {
-                    // call translation function if it exists on the facet dictionary
-                    // send the field name, and the value key
-                    facetLabel = v.translate.call(this, fs[0], fs[1]);
-                }
-                return false;
-            }
-        });
+        var facetLabel = lf[2];
+    
+        if (fs.translateFacets) {
+            var fTf = lf[3] ? lf[3] : lf[1];
+            var fTk = lf[4] ? lf[4] : lf[2];
+            facetLabel = fs.translateFacets.call(fTf, fTk);
+        }
 
         var selectedFacet = $('<a/>')
             .text(facetLabel)
@@ -666,30 +803,10 @@
             .addClass(sfs.class)
             .on('click', function (e) {
                 e.preventDefault();
-                ls.facetsSelected
-                    .splice(
-                        ls.facetsSelected.indexOf($(this).data('value')), 1
-                    );
-                ls.searchParams.skip = 0;
-                local.currentPage = 1;
-                ls.facetsApplied.onChange.call(ls.facetsSelected.slice(0));
-                // check if any facets exist other than this one
-                if(ls.facetsApplied.groupFacetsByType && $(this).parent('.selected-facets-group[data-az-field="'+fs[0]+'"]').children('.selected-facet').length <= 1) {
-                    $(this).parent('.selected-facets-group[data-az-field="'+fs[0]+'"]').remove();
-                } else {
-                    $(this).remove();   
-                }
+                removeFacet($(this));
+            });
 
-                if (!(c.children().not('.clear-all-facets, .selected-facet-label').length > 0)) {
-                    local.hasActiveFacets = false;
-                    local.clearAllAdded = false;
-                    c.empty().hide();
-                }               
-
-                search();
-            })
-
-            if(sfs.groupFacetsByType) {
+            if (sfs.groupFacetsByType) {
                 selectedFacet.appendTo(cc);
             } else {
                 if (local.clearAllAdded) {
@@ -700,10 +817,8 @@
 
             }
 
-            
-
             // clearAll
-            if(sfs.clearAll.enabled && !local.clearAllAdded) {
+            if (sfs.clearAll.enabled && !local.clearAllAdded) {
                 $('<a/>').text(sfs.clearAll.label)
                 .attr({ 'href': '#' })
                 .attr(sfs.extraAttributes)
@@ -727,12 +842,52 @@
 
             local.hasActiveFacets = true;
             c.show();
-
     }
 
-    //Load the facets according to the results
-    function loadFacets(data) {
-        var fs = ls.facets;
+    // sfs_item = jquery object, for facet item to be removed
+    function removeFacet(sfs_item) {
+        var sfs = ls.facetsApplied;
+
+        if (!sfs.container)
+            return;
+
+        var c = $(sfs.container);
+
+        ls.facetsSelected
+            .splice(
+                ls.facetsSelected.indexOf(sfs_item.data('value')), 1
+            );
+        ls.searchParams.skip = 0;
+        local.currentPage = 1;
+        ls.facetsApplied.onChange.call(ls.facetsSelected.slice(0));
+        // check if any facets exist other than this one
+        if (ls.facetsApplied.groupFacetsByType && sfs_item.parent('.selected-facets-group[data-az-field="' + fs[1] + '"]').children('.selected-facet').length <= 1) {
+            sfs_item.parent('.selected-facets-group[data-az-field="' + fs[1] + '"]').remove();
+        } else {
+            sfs_item.remove();
+        }
+
+        if (!(c.children().not('.clear-all-facets, .selected-facet-label').length > 0)) {
+            local.hasActiveFacets = false;
+            local.clearAllAdded = false;
+            c.empty().hide();
+        }
+
+        search();
+    }
+
+    // Load the facets according to the results
+    /*** this function is public ****/
+    /* so that facets can be rendered outside of a search request */    
+    function loadFacets(data, fs, _fd) {
+        
+        if (!fs)
+            fs = ls.facets;
+
+        if (!_fd) {
+            _fd = ls.facetsDictionary;
+        }
+
         var c = $(fs.container);
 
         //Check if the containers was defiend and if the facets were part of the results
@@ -741,16 +896,16 @@
 
         c.html('');
         
-        $(Object.keys(ls.facetsDictionary)).each(function (i, v) {
+        $.each(_fd, function (i, v) {
 
-            var _fsNm = ls.facetsDictionary[v].fieldName;
+            var _fsNm = v.fieldName;
                        
             if (data["@search.facets"][_fsNm]) {
 
                //Facet's Title
                var tt = v;
-               if(typeof ls.facetsDictionary[v] == 'object' && ls.facetsDictionary[v].label) {
-                   tt = ls.facetsDictionary[v].label;
+               if (typeof v === 'object' && v.label) {
+                   tt = v.label;
                } else {
                    tt = _fsNm;
                }
@@ -769,11 +924,11 @@
                 var w = $(fs.wrapperContainer).addClass(fs.wrapperContainerClass);
                 c.append(w);
 
-                if(typeof ls.facetsDictionary[v] == 'object' && ls.facetsDictionary[v].dropdown) {
-                    renderFacetSelect(w, title, data, _fsNm, ls.facetsDictionary[v]);
+                if (typeof v === 'object' && v.tagname === "select") {
+                    renderFacetSelect(w, title, data, _fsNm, v, fs);
                 }
                 else {
-                    renderFacetList(w, title, data, _fsNm, ls.facetsDictionary[v]);
+                    renderFacetList(w, title, data, _fsNm, v, fs);
                 }
                 
             }
@@ -784,41 +939,61 @@
     
     // render facet as dropdown select instead
     // of links
-    function renderFacetSelect(w, title, data, v, dicationary) {
-        var fs = ls.facets;
+    function renderFacetSelect(w, title, data, v, dicationary, fs) {
+
+        if (!fs)
+            fs = ls.facets;
+
         var c = $(fs.container);
 
         var control = $('<select />')
-        .data('azuresearchFacetName', v)
-        .on('change', fs.facetOnClick).append($('<option />').text('Select'));
+            .data('azuresearchFacetName', v)
+            .on('change', fs.facetOnClick)
+            .append($('<option />')
+            .text('Select'));
+
         w.append(control);
+
         var countFacets = 0;
+        
+        var facetList = data["@search.facets"][v];
+
+        if (fs.sortFacets)
+            facetList = fs.sortFacets.call(this, v, data["@search.facets"][v]);
+
 
         //Facets
-        $(data["@search.facets"][v]).each(function (j, k) {
+        $(facetList).each(function (j, k) {
 
-            let facetLabel = k.value;
-
-            if (dicationary.translate) {
+            if (!k.label && fs.translateFacets) {
                 // call translation function if it exists on the facet dictionary
                 // send the field name, and the value key
-                facetLabel = dicationary.translate.call(this, v, k.value);
+                k['label'] = fs.translateFacets.call(this, v, k.value);
             }
+            
+            var facetLabel = k.label ? k.label : k.value;
 
             //Create the facet
             var f = $('<option />')
                 // .addClass(fs.facetClass)
                 .text(facetLabel)
-                .attr('value', k.value);
+                .attr('value', k.value)
+                .data('azuresearchFacetName', v);
+
+            // setup custom translation
+            if (k.translation_field && k.translation_key) {
+                f.data('azuresearchFacetTranslationField', k.translation_field);
+                f.data('azuresearchFacetTranslationKey', k.translation_key);
+            }
 
             //Counter
-            if (fs.showCount) {
+            if (fs.showCount && k.count) {
                 f.text(f.text() + " (" + k.count + ")");
             }
             
             //Do not display selected facets
-            if (ls.facetsSelected.indexOf(v + '||' + k.value) != -1) {
-                f.attr("selected","selected");
+            if (ls.facetsSelected.indexOf(v + '||' + k.value) !== -1) {
+                f.attr("selected", "selected");
             }            
             control.append(f);
 
@@ -833,57 +1008,71 @@
             w.appendTo(gw);
         }
 
-        if (countFacets == 0) {
+        if (countFacets === 0) {
             title.remove();
             w.remove();
         }
     }
 
     // render facet list as links
-    function renderFacetList(w, title, data, v, dicationary) {
-        var fs = ls.facets;
+    function renderFacetList(w, title, data, v, dicationary, fs) {
+        
+        if (!fs)
+            fs = ls.facets;
+
         var c = $(fs.container);
+
+        var tagName, searchOp;
+
+        if (typeof dicationary === 'object') {
+            tagName = dicationary.tagname;
+            searchOp = dicationary.operator;
+        }
 
         var countFacets = 0;
 
+        var facetList = data["@search.facets"][v];
+
+        if (fs.sortFacets)
+            facetList = fs.sortFacets.call(this, v, data["@search.facets"][v]);
+
         //Facets
-        $(data["@search.facets"][v]).each(function (j, k) {
-
-            let facetLabel = k.value;
-
-            if (dicationary.translate) {
+        $(facetList).each(function (j, k) {
+            var fs = ls.facets;
+            if (!k.label && fs.translateFacets) {
                 // call translation function if it exists on the facet dictionary
                 // send the field name, and the value key
-                facetLabel = dicationary.translate.call(this, v, k.value);
+                k['label'] = fs.translateFacets.call(this, v, k.value);
             }
 
-            //Create the facet
-            var f = $(fs.facet)
-                .addClass(fs.facetClass)
-                .html(facetLabel)
-                .on('click', fs.facetOnClick)
-                .data('azuresearchFacetName', v)
-                .data('azuresearchFacetValue', k.value);
+            var f = createFactListItem(k, v, tagName, searchOp);
 
-            //Counter
-            if (fs.showCount && ls.facets.countWrapper) {
-                $(ls.facets.countWrapper)
-                    .text("(" + k.count + ")")
-                    .addClass(ls.facets.countWrapperClass)
-                    .appendTo(f);
-            } else if (fs.showCount) {
-                f.append(" (" + k.count + ")");
+            if (fs.wrapper) {
+                var facetItemWrapper = $(fs.wrapper).addClass(fs.wrapperClass);
+                facetItemWrapper.append(f).appendTo(w);
             }
-
-            //Do not display selected facets
-            if (ls.facetsSelected.indexOf(v + '||' + k.value) != -1) {
-                f.addClass('active-facet');
-            }
-
-            if (fs.wrapper)
-                $(fs.wrapper).addClass(fs.wrapperClass).append(f).appendTo(w);
-            else
+            else {
                 w.append(f);
+            }
+
+            if (k.children) {
+                $(k.children).each(function (_k, _v) {
+
+                    if (fs.translateFacets && !_v.label) {
+                        // call translation function if it exists on the facet dictionary
+                        // send the field name, and the value key
+                        k['label'] = fs.translateFacets.call(this, v, _v.value);
+                    }
+                    var _f = createFactListItem(_v, v, tagName, searchOp);
+                    if (facetItemWrapper) {
+                        facetItemWrapper.addClass('has-child-facets');
+                        $(fs.wrapper).addClass(fs.wrapperClass).append(_f).appendTo(facetItemWrapper);
+                        if (facetItemWrapper.find('.active-facet').length > 0) {
+                            facetItemWrapper.addClass('expanded');
+                        }
+                    }
+                });
+            }
 
             countFacets++;
         });
@@ -896,13 +1085,78 @@
             w.appendTo(gw);
         }
 
-        if (countFacets == 0) {
+        if (countFacets === 0) {
             title.remove();
             w.remove();
         }
 
     }
-    
+
+    function createFactListItem(k, v, el, op) {
+
+
+        var fs = ls.facets;
+
+        // if no search operator specified
+        // use the default configured
+        if (!op)
+            op = fs.searchMode;
+
+        //Create the facet
+        var facetData = op + '||' + v + '||' + k.value;
+        var facetLabelText = k.label ? k.label : k.value;
+        var facetLabel = facetLabelText;
+        //Counter
+        if (fs.showCount && k.count)
+            facetLabel += ' <span class="facet-count">(' + k.count + ')</span>';
+
+
+        var f;
+        if (el === 'radio' || el === 'checkbox') {
+
+            let f_id = v + '_' + k.value.replace(/\W/g, '');
+
+            f = $('<input />')
+                .on('change', fs.facetOnClick)
+                .attr({ type: el, name: v, id: f_id, value: k.value });
+            var _l = $('<label />').html(facetLabel).attr('for', f_id).attr('title', fs.facetAltText + facetLabelText);
+            var f_wrap = $('<div>').append(f).append(_l);
+        } else {
+
+            f = $('<a href=\"#\"/>')
+                .on('click', fs.facetOnClick)
+                .attr('title', fs.facetAltText + facetLabelText)
+                .html(facetLabel);
+        }
+
+        // set search data on facet elem
+        f.addClass(fs.facetClass).data('azuresearchFacetName', v).data('azuresearchFacetValue', k.value).data('azuresearchFacetOperator', op);
+
+        // setup custom translation
+        if (k.translation_field && k.translation_key) {
+            f.data('azuresearchFacetTranslationField', k.translation_field);
+            f.data('azuresearchFacetTranslationKey', k.translation_key);
+            facetData += '||' + k.translation_field + '||' + k.translation_key;
+        }
+
+        // add active class to facet item
+        if (ls.facetsSelected.indexOf(facetData) !== -1) {
+            f.addClass('active-facet');
+            if (el === 'radio' || el === 'checkbox') {
+                f.prop('checked', true);
+            }
+        }
+
+        if (typeof f_wrap !== 'undefined') {
+            return f_wrap;
+        } else {
+            return f;
+        }
+
+
+    }
+
+
     /**
      * Setup Date fields to filter results
      * based on a date range
@@ -918,48 +1172,75 @@
 
         if (df.to.selector && df.to.indexField && df.from.selector) {
             fs += ', ' + df.to.selector;
-        } else if (df.to.selector && df.to.indexField ) {
+        } else if (df.to.selector && df.to.indexField) {
             fs = df.to.selector;
         }
 
-        $(fs).on('change', function(e) {
-            handleDateInput( $(this).val(), $(this).data('dateDir'));
-        });
-
+        var fs_elem = $(fs);
         
-        $(fs).on('keydown', function (e) {
-            // search on return press
-            if(e.which === 13){
-                e.preventDefault();
-                handleDateInput( $(this).val(), $(this).data('dateDir'));
-            } 
-            // clear field and search on backspace/delete
-            else if(e.which == 8 || e.which == 46) {
-                e.preventDefault();
-                $(this).val('');
-                handleDateInput( $(this).val(), $(this).data('dateDir'));
+        // if the element has a value on load,
+        // handle this now
+        fs_elem.each(function (k, v) {
+            if ($(v).val()) {
+                setDateFilter($(v).val(), $(v).data('dateDir'));
             }
         });
 
-        function handleDateInput(val, dir) {
+        fs_elem.on('change', function (e) {
+            handleDateInput();
+        });
+        
+        fs_elem.on('keydown', function (e) {
+            // search on return press
+            if (e.which === 13) {
+                e.preventDefault();
+                handleDateInput();
+            } 
+            // clear field and search on backspace/delete
+            else if (e.which === 8 || e.which === 46) {
+                e.preventDefault();
+                $(this).val('');
+                handleDateInput();
+            }
+        });
+
+        function handleDateInput() {
+
+            fs_elem.each(function (k, v) {
+                setDateFilter($(v).val(), $(v).data('dateDir'));
+            });
+
+            ls.searchParams.skip = 0;
+            local.currentPage = 1;
+            search();
+        }
+
+        function setDateFilter(val, dir) {
             local[dir] = null;
             if (val && dir) {
-                var timeString = '00:00';
-                if (dir == 'toDate')
-                    timeString = '23:59';
-                val = df.zone ? val + ' ' + timeString + " " + df.zone : val + timeString;
-                var dateObj = new Date(val);
-                local[dir] = dateObj;
-            } 
+                var timeString = '00:00:00';
 
-            if(local.fromDate || local.toDate) {
+                // the OPL date format is dd/MM/yyyy
+                // so we will have to parse that date first
+                // to change to yyyy-MM-dd
+                var dateParts = val.split('/');
+                var dateYear = parseInt(dateParts[2]);
+                var dateMonth = parseInt(dateParts[1]) - 1;
+                var dateDay = parseInt(dateParts[0]);
+                var dateObj = new Date(dateYear, dateMonth, dateDay, 0, 0, 0, 0);
+
+                if (dir === 'toDate') {
+                    dateObj.setHours(23, 59, 59, 999);
+                } 
+                
+                local[dir] = dateObj;
+            }
+
+            if (local.fromDate || local.toDate) {
                 local.dateSearch = true;
             } else {
                 local.dateSearch = false;
             }
-            ls.searchParams.skip = 0;
-            local.currentPage = 1;
-            search();
         }
         
     }
@@ -967,18 +1248,26 @@
     // change search orderby option
     function defaultOrderbyChange(e) {
 
-        let searchField = $(this).data('searchField');
-        let searchDir = $(this).data('searchDir');
+        var searchField = $(this).data('searchField');
+        var searchDir = $(this).data('searchDir');
 
-        if ($(this)[0].nodeName == 'SELECT') {
+        if ($(this)[0].nodeName === 'SELECT') {
             searchField = $(this).find(':selected').data('searchField');
             searchDir = $(this).find(':selected').data('searchDir');
         }
 
-        ls.searchParams.orderby = searchField + ' ' + searchDir;
+        //reset to first page of results when
+        // changing orderby clause
+        ls.searchParams.skip = 0;
+        //ls.searchParams.orderby = searchField + ' ' + searchDir;
+        ls.searchParams.orderby = '';
+        searchField.split(';').forEach(function (v, i, arr) {
+            if (i > 0)
+                ls.searchParams.orderby += ', ';
+            ls.searchParams.orderby += v + ' ' + searchDir;
+        });
 
         search();
-
     }
 
     /**
@@ -988,27 +1277,27 @@
     //Execute the AJAX call to Azure Search
     function search() {
 
-        if(ls.results.pager.updateHistory) {
+        if (ls.results.pager.updateHistory) {
             updatePageHistory();   
         }
         
-        if(ls.facetsApplied.updateHistory) {
+        if (ls.facetsApplied.updateHistory) {
             updateFacetHistory();
         }
-
+        // reset returned params object so it can be updated
+        local.returnedParams = { groupedFacets: null, params: null, azureKeys: null };
 
         local.isGeoSearch = false;
 
         // show Loader
-        if(ls.results.loaderContainer)
-        $(ls.results.loaderContainer).fadeIn();
+        if (ls.results.loaderContainer)
+            $(ls.results.loaderContainer).fadeIn();
 
         // remove pager
         if (ls.results.pager.container)
             $(ls.results.pager.container).empty().fadeOut();
 
         // results message
-
         if (ls.results.resultsMsgContainer)
             $(ls.results.resultsMsgContainer).empty().fadeOut();
 
@@ -1023,10 +1312,10 @@
             debug(ls.geoSearch.lat);
             debug(ls.geoSearch.lng);
             local.isGeoSearch = true;
-            if (!ls.searchParams.orderby || ls.searchParams.orderby.indexOf(ls.geoSearch.fieldName) == 0) {
+            if (!ls.searchParams.orderby || ls.searchParams.orderby.indexOf(ls.geoSearch.fieldName) === 0) {
                 var orderby = "geo.distance(" + ls.geoSearch.azureFieldName;
                 orderby += ", geography'POINT(" + ls.geoSearch.lng + " " + ls.geoSearch.lat + ")')";
-                if (ls.searchParams.orderby && ls.searchParams.orderby.indexOf(' desc') != -1) orderby += ' desc';
+                if (ls.searchParams.orderby && ls.searchParams.orderby.indexOf(' desc') !== -1) orderby += ' desc';
                 ls.searchParams.orderby = orderby;
             }
         }
@@ -1036,29 +1325,65 @@
         
         var previousFilter = ls.searchParams.filter;
         ls.searchParams['facets'] = [];
-        if( ls.facetsDictionary ) {
-            $(Object.keys(ls.facetsDictionary)).each(function(k,v){
+        if (ls.facetsDictionary.length > 0) {
+            $(Object.keys(ls.facetsDictionary)).each(function (k, v) {
                 var fieldParams = null;
-                if(typeof ls.facetsDictionary[v] == 'object' && ls.facetsDictionary[v].params) 
+                if (typeof ls.facetsDictionary[v] === 'object' && ls.facetsDictionary[v].params) {
                     fieldParams = ls.facetsDictionary[v].fieldName + ',';
                     fieldParams += ls.facetsDictionary[v].params;
-                ls.searchParams['facets'].push(fieldParams);
+                    ls.searchParams['facets'].push(fieldParams);
+                }
             });
         }
 
+
+        local.returnedParams.groupedFacets = null;
+
         //Apply Facet Filters
         if (ls.facetsSelected.length > 0) {
-            var facetFilter = [];
-            ls.facetsSelected.forEach(function (item, index) {
-                var p = item.split('||');
-                // apply filter and escape single quotes in value (')
-                facetFilter.push(p[0] + '/any(m: m eq \'' + p[1].replace(/[']/gi,'\'\'') + '\')');
+            var facetFilterText = '';
+            // breakdown the selectedfacets array and organize by
+            // operator "AND/OR" and by index field
+            var groupedFacets = groupSelectedFacets();
+
+
+            local.returnedParams.groupedFacets = groupedFacets;
+
+            // iterate through both AND and OR groups
+            $.each(groupedFacets, function (_fk, _fv) {
+
+                // iterate through each facet search field key
+                $.each(_fv, function (_fvk, _fvv) {
+
+                    // iterate throgh each search filter value
+                    var _fvvi = 0;
+                    $.each(_fvv, function (_fvvk, _fvvv) {
+                        // if we are doing an OR operation
+                        // open a left bracket "(" to group all OR values
+                        // associated with this search field
+                        if (_fk === 'or' && _fvvi === 0) {
+                            facetFilterText += ' and (';
+                        }
+                        // of we're outputting AND operations, proceed normally;
+                        if (_fk === 'and' || _fvvi > 0)
+                            facetFilterText += ' ' + _fk + ' ';
+
+                        facetFilterText += _fvk + '/any(m: m eq \'' + _fvvv + '\')';
+
+                        _fvvi++;
+                    });
+                    // close the OR operation for this field
+                    if (_fk === 'or')
+                        facetFilterText += ')';
+
+                });
+
             });
 
-            f = facetFilter.join(' ' + ls.facets.searchMode + ' ');
+            f = facetFilterText;
 
             if (previousFilter)
-                f = ls.searchParams.filter + ' ' + ls.facets.searchMode + ' ' + f;
+                f = ls.searchParams.filter + ' ' + f;
 
         }
 
@@ -1066,8 +1391,8 @@
         if (local.isGeoSearch && ls.geoSearch.maxDistance) {
             debug('Filter Geo searching by distance : ' + ls.geoSearch.maxDistance);
             var geoFilter = "geo.distance(" + ls.geoSearch.azureFieldName + ", geography'POINT(" + ls.geoSearch.lng + " " + ls.geoSearch.lat + ")') le " + ls.geoSearch.maxDistance;
-            if(f) {
-                f += ' ' + ls.facets.searchMode + ' ' + geoFilter
+            if (f) {
+                f += ' ' + ls.facets.searchMode + ' ' + geoFilter;
             } else {
                 f = geoFilter;
                 if (previousFilter)
@@ -1076,8 +1401,8 @@
         }        
 
         var date_f = "";
-        if(local.dateSearch) {
-            if(local.fromDate) {
+        if (local.dateSearch) {
+            if (local.fromDate) {
                 date_f = ls.dates.fields.from.indexField + ' ge ' + local.fromDate.toISOString();           
             } 
 
@@ -1092,12 +1417,29 @@
                 
             } else {
                 f = date_f;
+                if (previousFilter)
+                    f = ls.searchParams.filter + ' ' + ls.facets.searchMode + ' ' + f;
             }
         }
 
-        if (f)
+        if (f) {
             ls.searchParams.filter = f;
+        }
 
+        ls.searchParams.search = sanitizeSearchTerm(local.queryText);
+
+        local.returnedParams.params = {
+            search: ls.searchParams.search ? ls.searchParams.search : "*",
+            filter: ls.searchParams.filter ? ls.searchParams.filter : "",
+            orderby: ls.searchParams.orderby ? ls.searchParams.orderby : "",
+            queryType: ls.searchParams.queryType ? ls.searchParams.queryType : "simple",
+            searchMode: ls.searchParams.searchMode ? ls.searchParams.searchMode : "all",
+            searchFields: ls.searchParams.searchFields ? ls.searchParams.searchFields : ""
+        };
+
+        local.returnedParams.azureKeys = ls.azureSearch;
+
+        debug(local.returnedParams);
 
         var settings = {
             "crossDomain": true,
@@ -1107,10 +1449,10 @@
                 "Content-Type": "application/json",
                 "Accept": "application/json",
                 "api-key": ls.azureSearch.key,
-                "Cache-Control": "no-cache",
+                "Cache-Control": "no-cache"
             },
             "data": JSON.stringify(ls.searchParams)
-        }
+        };
 
         $.ajax(settings).done(function (response) {
             local.totalResults = ls.searchParams.count && response['@odata.count'] ? response['@odata.count'] : -1;
@@ -1134,7 +1476,7 @@
 
         //Key
         var url = s.url;
-        url += url.indexOf('?') != -1 ? '&' : '?';
+        url += url.indexOf('?') !== -1 ? '&' : '?';
         url += 'key=' + s.key;
         url += '&address=' + address;
         url += '&language=' + s.language;
@@ -1146,22 +1488,74 @@
      * Utility Functions
      */
 
+    /**
+     * breakdown the selectedfacets array and organize by
+     * operator "AND/OR" and by index field
+     *
+     * @returns {object} grouped facet list
+     * 
+     * */
+    function groupSelectedFacets() {
+
+        var groupedFacets = {};
+
+        ls.facetsSelected.forEach(function (item, _i) {
+            var p = item.split('||');
+            // set operator based on facet configuration
+            if (typeof groupedFacets[p[0]] === 'undefined')
+                groupedFacets[p[0]] = {};
+
+            if (typeof groupedFacets[p[0]][p[1]] === 'undefined')
+                groupedFacets[p[0]][p[1]] = [];
+
+            groupedFacets[p[0]][p[1]].push(p[2]);
+
+
+        });
+
+        return groupedFacets;
+
+    }
+
+    /**
+     *
+     * @param {object} elem is a jquery element "$(selector)"
+     * @param {int} offset is the vertical offset of the listener
+     *
+     * @returns {boolean} whether element is in viewport or not
+     */
+    function isInViewport(elem, offset) {
+
+        if (typeof offset === 'undefined') {
+            offset = 0;
+        }
+
+        var elementTop = elem.offset().top;
+        var elementBottom = elementTop + elem.outerHeight();
+        var viewportTop = $(window).scrollTop();
+        var viewportBottom = viewportTop + $(window).height() - offset;
+
+        return elementBottom > viewportTop && elementTop < viewportBottom;
+
+    }
+
+
     //Calculate the distance between two geo points
     function distance(lat1, lon1, lat2, lon2, unit) {
 
-        var radlat1 = Math.PI * lat1 / 180
-        var radlat2 = Math.PI * lat2 / 180
-        var theta = lon1 - lon2
-        var radtheta = Math.PI * theta / 180
+        var radlat1 = Math.PI * lat1 / 180;
+        var radlat2 = Math.PI * lat2 / 180;
+        var theta = lon1 - lon2;
+        var radtheta = Math.PI * theta / 180;
         var dist = Math.sin(radlat1) * Math.sin(radlat2) + Math.cos(radlat1) * Math.cos(radlat2) * Math.cos(radtheta);
         if (dist > 1) {
             dist = 1;
         }
-        dist = Math.acos(dist)
-        dist = dist * 180 / Math.PI
-        dist = dist * 60 * 1.1515
-        if (unit == "K") { dist = dist * 1.609344 }
-        if (unit == "N") { dist = dist * 0.8684 }
+        dist = Math.acos(dist);
+        dist = dist * 180 / Math.PI;
+        dist = dist * 60 * 1.1515;
+        if (unit === "K") { dist = dist * 1.609344; }
+        if (unit === "N") { dist = dist * 0.8684; }
         return dist;
     }
 
@@ -1170,7 +1564,7 @@
         if (ls.debug && window.console && window.console.log) {
             window.console.log(obj);
         }
-    };
+    }
 
     //Get query string parameters
     function query(sParam) {
@@ -1178,8 +1572,8 @@
         if (!sParam)
             return null;
 
-        var sPageURL = decodeURIComponent(window.location.search.substring(1)),
-            sURLVariables = sPageURL.split('&'),
+        var sPageURL = window.location.search.substring(1),
+            sURLVariables = sPageURL.split(/(\&){1}(?!\&)/gi),
             sParameterName,
             i;
 
@@ -1187,11 +1581,11 @@
             sParameterName = sURLVariables[i].split('=');
 
             if (sParameterName[0] === sParam) {
-                return sParameterName[1] === undefined ? true : sParameterName[1];
+                return sParameterName[1] === undefined ? true : decodeURIComponent(sParameterName[1].replace(/\+/g, " "));
             }
         }
         return null;
-    };
+    }
 
     // Check the configured url parameters for values
     function checkUrlParameters() {
@@ -1211,22 +1605,19 @@
             page: 'p', */
 
         //Split LatLong
-        if (latlong && latlong.indexOf(',') != -1) {
+        if (latlong && latlong.indexOf(',') !== -1) {
             latitude = latlong.split(',')[0];
             longitude = latlong.split(',')[1];
         }
 
         //Apply Parameters
         if (search) {
-            // escape double quotes if they are at the beginning or end of the search string
-            ls.searchParams.search = search.replace(/[\"]{1}/gi, '\\"');
-            //ls.searchParams.search = encodeURIComponent(search);
-            local.queryText = search;   
+           local.queryText = search;   
         }
 
         if (page && ls.results.pager.updateHistory) {
             local.currentPage = Math.floor(parseFloat(page));
-            if(ls.results.pager.loadMore) {
+            if (ls.results.pager.loadMore || ls.results.pager.infinite) {
                 ls.searchParams.skip = 0;
                 ls.searchParams.top = local.currentPage * ls.results.pager.pageSize;
             } else {
@@ -1234,7 +1625,7 @@
             }            
         }
 
-        if(facets) {
+        if (facets) {
             ls.facetsSelected = facets.split(';');
         }
         
@@ -1262,7 +1653,7 @@
         facetParam = ls.urlParameters.facets;
         // check to see if facets are already in the
         // query string, and if so, remove them
-        if( urlInit.indexOf(facetParam) > -1 ) {
+        if (urlInit.indexOf(facetParam) > -1) {
             urlNew = updateUrlParameter(urlInit, facetParam);
         } else {
             urlNew = urlInit;
@@ -1270,24 +1661,24 @@
         // check to see if facets have been 
         // applied to the search options
         // and if so, add them to the query string
-        if(ls.facetsSelected.length > 0) {     
+        if (ls.facetsSelected.length > 0) {     
             
             // facetString = .toString();
             facetString = '';
-            $.each(ls.facetsSelected, function(k, v) {
-                if(k > 0) {
+            $.each(ls.facetsSelected, function (k, v) {
+                if (k > 0) {
                     facetString += ';';
                 }
                 facetString += encodeURIComponent(v.toString());
             });                
             updatedHistoryUrl = urlNew;
-            updatedHistoryUrl += (urlNew.indexOf('?') > -1) ? '&' : '?';
+            updatedHistoryUrl += urlNew.indexOf('?') > -1 ? '&' : '?';
             updatedHistoryUrl += facetParam + '=' + facetString;
         } else {
             updatedHistoryUrl = urlNew;
         }  
         // push the new search query string to the browser history
-        window.history.replaceState( { 'url' : updatedHistoryUrl }, '', updatedHistoryUrl );     
+        window.history.replaceState({ 'url' : updatedHistoryUrl }, '', updatedHistoryUrl.replace(/%3Cscript%3E/g, ''));     
     }
 
     // update the current page query string for pagination
@@ -1298,7 +1689,7 @@
         pageParam = ls.urlParameters.page;
         // check to see if facets are already in the
         // query string, and if so, remove them
-        if( urlInit.indexOf(pageParam) > -1 ) {
+        if (urlInit.indexOf(pageParam) > -1) {
             urlNew = updateUrlParameter(urlInit, pageParam);
         } else {
             urlNew = urlInit;
@@ -1306,18 +1697,18 @@
         // check to see if facets have been 
         // applied to the search options
         // and if so, add them to the query string
-        if(local.currentPage > 1) {                
+        if (local.currentPage > 1) {                
             // facetString = .toString();
             pageVal = local.currentPage.toString();
                           
             updatedHistoryUrl = urlNew;
-            updatedHistoryUrl += (urlNew.indexOf('?') > -1) ? '&' : '?';
+            updatedHistoryUrl += urlNew.indexOf('?') > -1 ? '&' : '?';
             updatedHistoryUrl += pageParam + '=' + pageVal;
         } else {
             updatedHistoryUrl = urlNew;
         }  
         // push the new search query string to the browser history
-        window.history.replaceState( { 'url' : updatedHistoryUrl }, 'page', updatedHistoryUrl );     
+        window.history.replaceState({ 'url' : updatedHistoryUrl }, 'page', updatedHistoryUrl.replace(/%3Cscript%3E/g, ''));     
     }
 
     //append or update query string parameters
@@ -1338,7 +1729,7 @@
             }
             // replace first occurrence of & by ? if no ? is present
             if (uri.indexOf('?') === -1) {
-                uri = uri.replace(/&/, '?')
+                uri = uri.replace(/&/, '?');
             }
         } else if (uri.match(re)) {
             uri = uri.replace(re, '$1' + key + "=" + value + '$2');
@@ -1348,6 +1739,52 @@
         return uri + hash;
     }
 
+    //sanitze search term so it can be sent to azure search
+    function sanitizeSearchTerm(_term) {
+        
+        var wildcardOperator = '*';
+        var termText = _term;
+        
+        if (_term) {
+
+            var _searchTerm = _term.trim().replace(/[\\]{1}/gi, '\\').replace(/[\"]{1}/gi, '\$&').replace(/[\~\?\*\:\/\^\[\]\(\)\{\}\!\+\-]{1}/gi, ' ').replace(/(\s\&\s)/gi, ' \\& ').replace(/(\&){2}/gi, '\\$&').replace(/(\|){2}/gi, '\\$&').trim();
+            
+            termText = '(' + _searchTerm + ')';
+
+            if (_term.indexOf('"') === -1) {
+
+                // Check if the term starts with a quotation mark
+                // and if not, apply quotes and use proximity search
+                if (ls.searchParams.queryType === 'full' && ls.azureSearch.useTermProximity) {
+                    var _proximitySearchTerm = '\"' + _searchTerm + '\"~' + ls.azureSearch.termProximityDistance;
+                    termText += ' | (' + _proximitySearchTerm + ')';
+                }
+
+                // add fuzzy search results
+                if (ls.searchParams.queryType === 'full' && ls.azureSearch.isFuzzy && ls.azureSearch.fuzzyProximity > 0) {
+                    var _fuzzySearchTerm = _searchTerm.replace(/[\s^]+(?=([^\"]*\"[^\"]*\")*[^\"]*$)(?=([^\']*\'[^\']*\')*[^\']*$)/gi, '~' + ls.azureSearch.fuzzyProximity + ' ') + '~' + ls.azureSearch.fuzzyProximity;
+                    termText += ' | (' + _fuzzySearchTerm + ')';
+                }
+
+                // add wildcard or prefix search results
+                if (ls.azureSearch.isWildcard) {
+                    const _wildcardSearchText = _searchTerm.replace(/[\s^]+(?=([^\"]*\"[^\"]*\")*[^\"]*$)(?=([^\']*\'[^\']*\')*[^\']*$)/gi, '* ') + '*';
+                    termText += ' | (' + _wildcardSearchText + ')';
+                }
+
+
+            }
+
+
+        }
+
+        return termText;
+
+    }
+
+    function jsEscapeSearchTerm(_term) {
+        return $('<textarea/>').text(_term).html();
+    }
 
 }(jQuery));
 
